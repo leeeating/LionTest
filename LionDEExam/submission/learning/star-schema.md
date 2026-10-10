@@ -29,6 +29,23 @@ dim_member ── fact_order ── dim_product
 - **用**：給 BI 報表、分析查詢的資料倉儲（warehouse 或 lakehouse 的整理層）。查詢套路固定、好懂、join 少。
 - **不要用**：應用程式日常讀寫的 OLTP 資料庫。那裡要的是正規化、避免重複，星型模型刻意把描述複製到維度裡（例如城市名直接放在 dim_member），是為了查得快、好懂，代價是寫入時要多處理。
 
+## 其他形狀與建模方法
+真正跟星型二選一的是雪花：
+
+| 形狀 | 長相 | 優點 | 代價 |
+|---|---|---|---|
+| 星型（star） | dim 只有一層，描述直接放在 dim 裡 | join 少、好懂、查詢快 | 描述重複存放（每位會員都存一次城市名） |
+| 雪花（snowflake） | dim 再往外拆，例如 `dim_product` → `dim_category` | 描述不重複，改一處就好 | join 變多，難懂、查詢可能較慢 |
+
+預設選星型。Kimball 明確建議避免雪花：攤平的 dim 和雪花裝的資訊一樣，雪花只是更難懂、可能更慢。
+
+**星系（galaxy／fact constellation）不是替代選項，是星型的延伸**：fact 不只一張時（例如 `fact_order` 和 `fact_payment`），多個星型共用同一批 dim（`dim_member`、`dim_date`），讓不同主題的數字能用同一套維度比較。被共用的 dim 叫 conformed dimension，欄位名稱與值的定義要各方一致。
+
+不是形狀、而是另一套方法：
+- **Inmon 3NF**：先建高度正規化的企業資料倉儲，再從它切出星型給各部門用（Kimball 則是直接建星型）。
+- **Data Vault**：拆成 hub（業務鍵）、link（關係）、satellite（屬性與歷史），擅長整合多個來源、保留完整歷史；給報表查之前通常還要再轉成星型。
+- **OBT（One Big Table）**：把 fact 和 dim join 成一張寬表，BI 直接查；columnar 儲存讓這種做法變得可行。常疊在星型之上，當作給 BI 的最後一層，不一定取代星型。限制是一張 OBT 只能有一種粒度，維度屬性變了也要回頭改寫所有相關列。
+
 ## 最小可跑範例
 DuckDB，一張 fact、兩張 dim；`dim_member` 用 SCD2，M001 在 6/1 從普卡升金卡（`uv run python demo.py`）：
 
@@ -81,4 +98,8 @@ M001 的 5 月訂單算在普卡、6 月訂單算在金卡：因為 fact 存的�
 - 相關筆記：[scd.md](scd.md)（維度歷史）、[point-in-time-join.md](point-in-time-join.md)（fact 只存自然鍵時，怎麼對到當時的版本）。
 
 ## 官方文件
-未證實：這次沒有讀原始文獻，內容是 Kimball 維度建模的一般說法。可對照 Kimball & Ross《The Data Warehouse Toolkit》（粒度、代理鍵、退化維度的出處），以及 Kimball Group 網站的 Dimensional Modeling Techniques 列表。
+未證實：這次沒有讀原始文獻，內容是 Kimball 維度建模的一般說法；「其他形狀與建模方法」中 Inmon、Data Vault、OBT 同樣是一般知識。
+
+Kimball Group（驗收 agent 查證過）：
+- 雪花維度與「避免雪花」的建議：https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/snowflake-dimension/
+- conformed dimension：https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/conformed-dimension/可對照 Kimball & Ross《The Data Warehouse Toolkit》（粒度、代理鍵、退化維度的出處），以及 Kimball Group 網站的 Dimensional Modeling Techniques 列表。
