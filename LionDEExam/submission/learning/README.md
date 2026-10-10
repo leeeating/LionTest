@@ -21,7 +21,8 @@
 | SCD：維度歷史怎麼保存（Type 0～4、6） | 📄 [scd.md](scd.md) | Part B #2、#6 `update_dim_member` | A-1 指定 SCD2、B |
 | point-in-time join：對到「當時」的維度版本 | 📄 [point-in-time-join.md](point-in-time-join.md) | Part B #4、#6 | A-1、B |
 | join 一對多膨脹：join 前先確認 key 唯一 | ○ | Part B #4 `converted.join(members, "member_id", "left")` | A-1、A-2、B |
-| 事實表粒度：一列代表什麼（事件 vs 訂單） | ○ | `notes/dataset/dictionary.md` 總覽表的「粒度」欄 | A-1 |
+| 星型模型：fact／dim、度量、代理鍵、日期維度 | 📄 [star-schema.md](star-schema.md) | `buggy_pipeline.py` 的 `dim/dim_member`、`fact/fact_order` | A-1 |
+| 事實表粒度：一列代表什麼（事件 vs 訂單） | 📄 [star-schema.md](star-schema.md) | `notes/dataset/dictionary.md` 總覽表的「粒度」欄 | A-1 |
 
 ### 2. 增量與冪等 ETL（Ingestion／Transformation）
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
@@ -60,7 +61,7 @@
 | 重跑與失敗處理：批次參數必填、步驟冪等、批次狀態 | ○ | Part B #10 `def main(batch_date: str = "day1"):` | A-2、B |
 
 ### 題目會考、還沒碰到
-星型模型與維度鍵設計（A-1）、資料品質報告的寫法（A-3）、架構取捨與語意層（C）、以及三選一模組各自的主題：效能瓶頸分析（D）、LLM-as-judge 評分（E）、特徵洩漏（F）。做到時再補進上面的分類。
+資料品質報告的寫法（A-3）、架構取捨與語意層（C）、以及三選一模組各自的主題：效能瓶頸分析（D）、LLM-as-judge 評分（E）、特徵洩漏（F）。做到時再補進上面的分類。
 
 ## 怎麼新增
 
