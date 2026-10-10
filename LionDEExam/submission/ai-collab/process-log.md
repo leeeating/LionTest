@@ -87,6 +87,14 @@ AI 原本請使用者自己先讀 `buggy_pipeline.py`。使用者回：「你應
 
 - 依據：commit `2afc5cb`、`83ccac2`、`4a14b0f`、`8dc5453`、`87f3788`
 
+### 2026-10-10｜Part B｜prod 復原：「delta不是有版控的檔案嗎」讓修法改成 RESTORE 優先
+
+使用者要報告說明「這個pipline pr被接受後如何在prod 復原資料錯誤的問題」，5.3 因此改寫成 prod 復原。AI 的版本把 fact 寫成「修補不可行，只能從原始檔重建」，只有 dim 提到 RESTORE。使用者問「delta不是有版控的檔案嗎」，指出 fact 一樣是 Delta 表、一樣能退版。AI 因此把修法改成 RESTORE 回 bug 之前的乾淨版本再重播增量優先，退不回去才從原始檔重建；RESTORE 還有一個從零重建做不到的好處：程式從沒讀過 `orders_base`，bug 上線前 fact 裡已有的歷史只有 RESTORE 保得住。RESTORE、VACUUM 的行為用本機 delta-spark 實測（E10），先前提的「#2 補 VACUUM 前提」也一併寫進報告。
+
+驗收 agent 這段抓到 AI 的推論寫成定論：「bug 上線一週內沒發現就退不回去」只在有排程 VACUUM 時成立（開源 Delta 不會自動 VACUUM）；復原步驟沒寫清楚 dim 要先於 fact 修好；表格漏了 #6；沒交代 ANSI 開啟時 prod 的狀態不同（dim 已被覆寫、fact 根本沒寫入）。
+
+- 依據：commit `fbf92f4`；`part_b/evidence.md` E10
+
 ### 〔進行中〕Part B｜審閱報告初稿
 
 接下來由使用者逐條審閱報告並用自己的話定稿。#12 的嚴重度（目前 P2）他決定暫不處理。〔待使用者確認〕
