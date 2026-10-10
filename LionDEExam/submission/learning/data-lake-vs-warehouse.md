@@ -57,6 +57,31 @@ log = [
 
 產品清單是一般知識，未逐一查官方文件。
 
+## Delta 是什麼
+**Delta 不是要啟動的軟體，是一套表格式（table format）規格，加上照規格讀寫的函式庫。** 像 JSON：JSON 是格式，Python 用 `json` 模組、C# 用 `System.Text.Json` 讀寫，中間沒有 server；MySQL 則是要先啟動 server，所有讀寫都經過它。
+
+| 層 | 是什麼 | 例子 |
+|---|---|---|
+| 規格 | 規定資料夾裡的檔案與記帳本怎麼寫 | Delta 的 `PROTOCOL.md` |
+| 函式庫 | 照規格實作讀寫 | `delta-spark`（Spark 用，本專案 `pyproject.toml` 有裝）、`deltalake`（delta-rs）、DuckDB 的 delta extension（能不能寫入未證實） |
+| 資料 | 儲存空間裡的檔案 | `fact/fact_order/` 資料夾 |
+
+查詢、`MERGE` 這些運算是 Spark、DuckDB 在做，Delta 函式庫讓它們照規格讀寫檔案。同類的表格式還有 Apache Iceberg、Apache Hudi。
+
+**Delta 表 ＝ 普通 Parquet 資料檔 ＋ Delta 定義的 metadata（`_delta_log/`）**：Parquet 管「資料長什麼樣」，Delta 管「哪些資料算數、怎麼安全地改」。`_delta_log/` 記的是：每個版本由哪些檔案組成、schema、檔案的 min／max 統計（預設只收前幾十個欄位，查詢時用來跳過不相關的檔案）、每次寫入的操作紀錄。規格除了 metadata 長相，還規定怎麼寫才安全：先寫資料檔、最後寫出下一號 log 檔才算數，所以寫到一半當機，讀的人看不到半成品；兩個程式同時寫入時，只有一個能寫出下一號 log 檔，另一個檢查有沒有衝突，沒衝突（例如單純 append）就自動重試，有衝突（例如兩個 MERGE 改到同一批資料）就丟例外，要由 pipeline 自己處理。也因此 lakehouse 的檔案不能手動刪改，log 會以為檔案還在。
+
+## lakehouse 和 OLTP 的存法差異
+| | OLTP（例如 MySQL） | Lakehouse（Delta） |
+|---|---|---|
+| 怎麼存 | 按列存，一筆資料放一起 | Parquet 按欄存，同一欄的值放一起 |
+| 怎麼改 | 直接改那一列（in-place） | 檔案不改，寫新檔再在記帳本上換掉舊檔 |
+| 怎麼找資料 | 索引（B-tree），直接找到某一筆 | 沒有傳統索引；靠分區（例如 `partitionBy("order_date")`）和檔案的 min／max 統計跳過不相關的檔案。Z-order、liquid clustering 是重排資料讓 min／max 更好用，不是索引 |
+| 寫入節奏 | 一秒很多筆小交易 | 通常是批次大量寫入（本專案一天一批）；也支援 streaming |
+| 約束 | 主鍵、唯一鍵、外鍵由資料庫擋 | 不強制主鍵、唯一鍵，重複資料照樣寫得進去；`NOT NULL`、`CHECK` 約束會擋 |
+| 版本 | 只有目前狀態 | 每張表各自有版本，每次寫入前進一版；不同表之間的寫入不是同一個交易 |
+
+最後兩列跟 Part B 直接相關：`order_id` 不會被表擋下重複，所以 #3 的 append 會默默寫出重複訂單，去重和 MERGE 要由 pipeline 自己負責；一次執行會讓 `dim_member` 和 `fact_order` 各前進一版，兩者不會一起成功或一起失敗（#10）。
+
 ## 什麼時候用、什麼時候不要用
 - **Warehouse**：資料量中等、主要給 BI 報表查、團隊熟 SQL、想要少維運。
 - **Lake**：原始資料先落地保存（不知道之後要怎麼用）、非結構化資料（log、圖片）。只當原料區，不直接給報表查。
@@ -101,7 +126,7 @@ Delta 的記帳本沒有在本機實跑（需要 Spark＋Java），上面的 Pyt
 
 ## 常見的坑
 - **把 lake 當成 warehouse 用**：CSV 不定 schema，所有欄位都是字串，金額比大小靠隱式轉型（Part B #12）。
-- **以為 lakehouse 的舊版本永遠都在**：VACUUM 會真正刪掉作廢超過保留期的舊檔，刪了就不能 time travel；就算沒跑 VACUUM，記帳本本身超過保留期被清掉，舊版本也一樣回不去（Part B #2 的 dim 被覆寫，只在保留期內、VACUUM 之前救得回來）。兩個保留期的預設值（一般說法是 7 天與 30 天）未證實。
+- **以為 lakehouse 的舊版本永遠都在**：VACUUM 會真正刪掉作廢超過保留期的舊檔，刪了就不能 time travel；就算沒跑 VACUUM，記帳本本身超過保留期被清掉，舊版本也一樣回不去（Part B #2 的 dim 被覆寫，只在保留期內、VACUUM 之前救得回來）。VACUUM 的預設保留期是 7 天（PROTOCOL.md）；log 的預設保留期一般說法是 30 天，未證實。
 - **lake 裡的原始檔被覆蓋或刪掉**：之後表寫壞了就沒有原料可以重做。
 
 ## 本專案出處
@@ -110,11 +135,15 @@ Delta 的記帳本沒有在本機實跑（需要 Spark＋Java），上面的 Pyt
 - 題目 Part C 考 Lakehouse vs Warehouse 的架構取捨。
 
 ## 官方文件
-lake／warehouse／lakehouse 的分類是一般定義，未讀官方文件，可對照 Reis & Housley《Fundamentals of Data Engineering》的 storage 章節。VACUUM 與 log 的預設保留期未證實，寫 Part C 時要查 Delta Lake 官方文件確認。
+lake／warehouse／lakehouse 的分類是一般定義，未讀官方文件，可對照 Reis & Housley《Fundamentals of Data Engineering》的 storage 章節。log 的預設保留期未證實，寫 Part C 時要查 Delta Lake 官方文件確認。
 
 Delta（驗收 agent 查證過）：
 - transaction log 的 action（add、remove、metaData、cdc 等）：https://github.com/delta-io/delta/blob/master/PROTOCOL.md
 - deletion vectors：https://docs.delta.io/latest/delta-deletion-vectors.html
+- 約束只支援 `NOT NULL`、`CHECK`（沒有主鍵、唯一鍵）：https://docs.delta.io/latest/delta-constraints.html
+- 並行寫入的衝突與例外：https://docs.delta.io/latest/concurrency-control.html
+- min／max 統計、Z-order、liquid clustering：https://docs.delta.io/latest/optimizations-oss.html
+- 兩階段寫入（先寫資料檔、再寫 log）與 VACUUM 預設 7 天：同上 PROTOCOL.md
 
 Azure 儲存（驗收 agent 查證過）：
 - Blob 的虛擬資料夾與 hierarchical namespace（原子目錄操作）：https://learn.microsoft.com/en-us/azure/storage/blobs/data-lake-storage-namespace
