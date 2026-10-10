@@ -46,3 +46,8 @@
 - 經過：使用者想從這個專案中把觀念內化成自己的 SWE 能力，指定參考 Matt Pocock 的 teach skill。AI 查證原版設計，發現它是用來學新主題、教材來自外部資源，不是從專案萃取觀念；使用者決定學習內容放進 repo 的 `learning/`、課程改用 Markdown。AI 依此改寫成「先從專案萃取、再對照一手資源」，並拿掉 HTML、assets、reference、glossary、NOTES 等不必要的部分。
 - 誰：使用者提出需求，並決定位置與格式；AI 查證原版並改寫。
 - 依據：session 3b7e0f96；原版 https://github.com/mattpocock/skills/tree/49dd158/skills/productivity/teach（commit 49dd158）；`.claude/skills/teach/`、`learning/README.md`。
+
+## 2026-10-10｜全專案｜teach 改為 concept-note：討論中挑選可遷移觀念
+- 經過：使用者看過 teach（mission、課綱、學習紀錄、測驗的多 session 流程）後，描述自己要的方式：在討論中問 AI 哪些觀念值得記，AI 提供選項，使用者選擇後由 AI 寫一份簡單筆記，偏向套件用法、SQL 等可帶到其他專案的 SWE 技能。AI 依此刪除 teach，改寫成 `concept-note` skill，並改寫 `learning/README.md`。
+- 誰：使用者決定方式；AI 撰寫 skill。
+- 依據：session 3b7e0f96；teach 的 commit `8b09ff9`；`.claude/skills/concept-note/SKILL.md`、`learning/README.md`。
