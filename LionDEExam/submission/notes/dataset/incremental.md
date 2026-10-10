@@ -2,7 +2,7 @@
 
 回到入口：[README.md](README.md)
 
-一句話：增量檔每一列是訂單某次變更後的**完整快照**，不是欄位 diff；但 `updated_at` 大多晚於批次日，原因不明。欄位說明在 [dictionary.md](dictionary.md)。標「未證實」的是推測，要等 Part A 的 A-3 確認。查詢與輸出見 `../../ai-collab/process-log-part-b.md` B-02。
+一句話：增量檔每一列是訂單某次變更後的**完整快照**，不是欄位 diff；但 `updated_at` 大多晚於批次日，原因不明。欄位說明在 [dictionary.md](dictionary.md)。標「未證實」的是推測，要等 Part A 的 A-3 確認。查詢與輸出見 `../../part_b/evidence.md` E9。
 
 ## 觀察（2026-10-10）
 

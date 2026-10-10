@@ -6,7 +6,7 @@
 
 **範圍**：這份只寫結構面，包括筆數、欄位、key、表之間的關聯、值域。值域照實際觀察列出，**不在這裡判斷是不是品質問題**，品質檢核由 Part A 的 A-3 負責。最後一節只列 Part B 已經用查詢驗證過的事實。
 
-**數字怎麼來的**：用 Python 標準庫 `csv` 讀檔（編碼 `utf-8-sig`）統計，查詢與輸出見 `../../ai-collab/process-log-part-b.md` B-02。官方欄位說明在 `candidate_package/README.md`，本文標「官方」的地方就是引用那份。
+**數字怎麼來的**：用 Python 標準庫 `csv` 讀檔（編碼 `utf-8-sig`）統計，查詢與輸出見 `../../part_b/evidence.md` E9。官方欄位說明在 `candidate_package/README.md`，本文標「官方」的地方就是引用那份。
 
 ## 總覽
 
@@ -85,7 +85,7 @@
 
 ## Part B 已經驗證的事實
 
-以下每一項都附查詢輸出，在 `../../ai-collab/process-log-part-b.md` B-01 步驟 3。
+以下每一項都附查詢輸出，在 `../../part_b/evidence.md`（依報告問題編號索引）。
 
 | 事實 | 數字 | 對應報告問題編號（`part_b/code-review.md`「問題總表」） |
 |---|---|---|

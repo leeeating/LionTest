@@ -21,7 +21,7 @@
 | 11 | P2 | `convert_currency`：`to_twd_udf = F.udf(to_twd, DoubleType())` | Python UDF 做乘法，慢，而且 null 被當成 0 | 4.5 |
 | 12 | P2 | `load_sources`：`spark.read.option("header", True).csv(`（4 處） | CSV 不指定 schema，所有欄位都是字串；金額比較靠隱式轉型（ANSI 關閉時靜默濾掉、開啟時報錯） | 4.5 |
 
-證據：所有筆數的查詢與輸出見 `ai-collab/process-log-part-b.md` B-01 步驟 3；資料欄位與值域見 `notes/dataset/dictionary.md`。
+證據：所有筆數的查詢與輸出見 `part_b/evidence.md`；資料欄位與值域見 `notes/dataset/dictionary.md`。
 
 ## 1. 摘要
 
@@ -64,7 +64,7 @@ flowchart LR
 1. **靜態閱讀**：逐函式追資料流，對每個寫入、filter、join 檢查四件事：重跑會怎樣、哪些列會消失或變多、數字算得對不對、SCD2 是否完整。
 2. **用真實資料量化影響**：題目要求不執行原管線，所以 `buggy_pipeline.py` 本身沒有執行，只用 `python3 -m py_compile` 確認語法正確。「業務影響」中的筆數，是用 Python 標準庫 `csv` 直接讀 `candidate_package/dataset/` 算出「如果這段邏輯跑下去會影響幾筆」。
 3. **linter 靜態分析**：用 ruff 0.17.0（預設規則，專案沒有 ruff 設定檔）檢查 `buggy_pipeline.py`，看工具能自動抓到哪些問題，結果見 4.6。
-4. **用小資料驗證關鍵語意**：撰寫期間另外在本機 `.venv`（pyspark 4.2＋delta-spark）用自建的小資料驗證三個語意：`dropDuplicates` 之後再套 window 沒有作用（#5）、`"replaceWhere", "member_id IS NOT NULL"` 搭配 overwrite 會清表（#2）、字串金額和整數比較的隱式轉型（#12）。以上查詢、腳本與輸出見 `ai-collab/process-log-part-b.md` B-01 步驟 3；資料結構見 `notes/dataset/`。
+4. **用小資料驗證關鍵語意**：撰寫期間另外在本機 `.venv`（pyspark 4.2＋delta-spark）用自建的小資料驗證三個語意：`dropDuplicates` 之後再套 window 沒有作用（#5）、`"replaceWhere", "member_id IS NOT NULL"` 搭配 overwrite 會清表（#2）、字串金額和整數比較的隱式轉型（#12）。以上查詢、腳本與輸出見 `part_b/evidence.md`；資料結構見 `notes/dataset/`。
 5. **嚴重度定義**：
    - **P0**：資料錯誤或遺失，下游報表直接出錯。
    - **P1**：特定情境下出錯，或會讓問題無法被發現。
