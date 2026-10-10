@@ -20,6 +20,7 @@
 | #12 CSV 不指定 schema、隱式轉型 | E3 `[#12]`；E5 `[3]`；E6 |
 | 4.6 靜態分析（ruff） | E8 |
 | `notes/dataset/` 資料字典、增量檔觀察 | E9 |
+| 5.3 若已部署到 prod：資料怎麼復原 | E10（報告引用 [2]、[3]；其餘情境為修正後 MERGE 的行為驗證） |
 
 ## E1｜主要數字重算（#1、#3～#7）
 
@@ -482,3 +483,309 @@ Found 3 errors.
 - 逐欄統計筆數、空值、值域，以及 key 是否唯一。主要輸出：所有檔案都有 BOM；空值 0；orders_base 有 100,040 列、100,000 個 order_id；base 的 currency 含 NTD 200 筆；base 的 `order_created_at` 有三種格式（+08:00 有 94,038 筆、`/` 有 3,001 筆、Z 有 3,001 筆）；base 有 120 筆 product_id 不在主檔；members 的 (member_id, extract_date) 重複 30 組；fx (rate_date, currency) 唯一。
 - AI 自查：第一次統計 amount 用字串比大小（例如輸出 `min=100129.0 max=99863.0`），結果沒有意義。改成轉成 float 重算，文件中的數字都是重算後的值。
 - 增量檔 `updated_at`（`notes/dataset/incremental.md`）：day1 `updated_at` 日期分布 {07-01: 1325, 07-02: 1428, 07-03: 1415, 07-04: 442, 07-05: 5}，晚於批次日 3,290 筆；day1 最晚到 07-05（批次日後 4 天），day2 有 6 列早於批次日。
+
+## E10｜Delta 寫入後的錯誤處理：重跑、RESTORE、VACUUM、並行衝突（5.3）
+
+驗證報告建議的 fact 寫法（以 `order_id` MERGE，`whenMatchedUpdateAll(condition="s.updated_at > t.updated_at")`＋`whenNotMatchedInsertAll`）寫入之後，出錯時能不能復原。不讀 dataset，只用自建的幾列小資料（`order_id`、`order_status`、`updated_at`），Delta 表寫在 `/tmp` 下的暫存目錄，跑完刪除。
+
+執行：在 `LionTest/` 執行 `uv run python -u /tmp/partb_e10/delta_recovery.py 2>/dev/null`（`-u` 讓 Python 輸出不緩衝，`Deleted 7 files ...` 那行是 Delta 的 VACUUM 自己印到 stdout 的，加 `-u` 後才會出現在正確位置）。五個情境在同一支腳本，輸出以 `[1]`～`[5]` 對應。
+
+```python
+"""E10：Delta MERGE 之後的錯誤處理（冪等重跑、RESTORE、VACUUM、並行衝突、中途失敗）。用法：uv run python delta_recovery.py"""
+import shutil, tempfile, threading
+from datetime import datetime as dt
+import pyspark, delta
+from delta import configure_spark_with_delta_pip
+from delta.tables import DeltaTable
+from pyspark.sql import SparkSession, functions as F
+
+b = (SparkSession.builder.master("local[4]").appName("partb_e10")
+     .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+     .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+     .config("spark.ui.enabled", "false"))
+spark = configure_spark_with_delta_pip(b).getOrCreate()
+spark.sparkContext.setLogLevel("OFF")
+print("pyspark", pyspark.__version__, "delta-spark", delta.__version__ if hasattr(delta, "__version__") else "?")
+
+SCHEMA = "order_id string, order_status string, updated_at timestamp"
+ROOT = tempfile.mkdtemp(dir="/tmp", prefix="e10_")
+
+def batch(rows):
+    return spark.createDataFrame([(o, s, dt.fromisoformat(u)) for o, s, u in rows], SCHEMA)
+
+def merge(path, src):
+    """報告建議的寫法：以 order_id MERGE，只在來源 updated_at 較新時更新。"""
+    (DeltaTable.forPath(spark, path).alias("t")
+     .merge(src.alias("s"), "t.order_id = s.order_id")
+     .whenMatchedUpdateAll(condition="s.updated_at > t.updated_at")
+     .whenNotMatchedInsertAll()
+     .execute())
+
+def show(tag, path, version=None):
+    r = spark.read.format("delta")
+    if version is not None:
+        r = r.option("versionAsOf", version)
+    rows = [(x.order_id, x.order_status, str(x.updated_at)) for x in r.load(path).orderBy("order_id").collect()]
+    print(f"  {tag}: {rows}")
+
+def history(path):
+    h = DeltaTable.forPath(spark, path).history().orderBy("version").collect()
+    for x in h:
+        m = x.operationMetrics or {}
+        keys = ["numTargetRowsInserted", "numTargetRowsUpdated", "numTargetRowsCopied", "numOutputRows"]
+        print(f"  v{x.version} {x.operation}", {k: m[k] for k in keys if k in m})
+
+def latest(path):
+    return DeltaTable.forPath(spark, path).history(1).collect()[0].version
+
+def err(e):
+    j = getattr(e, "java_exception", None)  # Py4JJavaError：往下找最底層的 Java 例外
+    if j is not None:
+        while j.getCause() is not None:
+            j = j.getCause()
+        return f"{type(e).__name__} <- {j.getClass().getName()}: {str(j.getMessage()).splitlines()[0][:200]}"
+    return f"{type(e).__name__}: {str(e).splitlines()[0][:200]}"
+
+# ---------- (1) 冪等與重播順序 ----------
+print("[1] 冪等與重播順序")
+p1 = f"{ROOT}/fact1"
+batch([("O1", "created", "2026-07-01 10:00:00"),
+       ("O2", "created", "2026-07-01 11:00:00")]).write.format("delta").save(p1)
+show("v0 建表", p1)
+b1 = batch([("O1", "paid", "2026-07-02 09:00:00"),
+            ("O3", "created", "2026-07-02 10:00:00")])
+merge(p1, b1); show(f"套用 batch1 後 (v{latest(p1)})", p1)
+merge(p1, b1); show(f"同一批 batch1 再跑一次後 (v{latest(p1)})", p1)
+old = batch([("O1", "created", "2026-07-01 10:30:00")])
+merge(p1, old); show(f"套用 updated_at 較舊的批次後 (v{latest(p1)})", p1)
+history(p1)
+
+# ---------- (2) 錯誤寫入後 RESTORE ----------
+print("[2] 錯誤寫入後 RESTORE")
+p2 = f"{ROOT}/fact2"
+batch([("O1", "paid", "2026-07-02 09:00:00"),
+       ("O2", "created", "2026-07-01 11:00:00")]).write.format("delta").save(p2)
+good_v = latest(p2); show(f"錯誤之前 (v{good_v})", p2)
+bad = batch([("O1", "cancelled", "2026-07-03 09:00:00"),      # 邏輯錯：O1 其實是 completed
+             ("O2", "cancelled", "2026-07-03 09:00:00")])     # 邏輯錯：O2 其實是 paid
+merge(p2, bad); show(f"套用錯誤批次後 (v{latest(p2)})", p2)
+nxt = batch([("O3", "created", "2026-07-04 08:00:00")])       # 錯誤之後的正確批次
+merge(p2, nxt); show(f"再套用正確的新批次後 (v{latest(p2)})", p2)
+spark.sql(f"RESTORE TABLE delta.`{p2}` TO VERSION AS OF {good_v}").show(truncate=False)
+show(f"RESTORE TO VERSION AS OF {good_v} 後 (v{latest(p2)})", p2)
+fix = batch([("O1", "completed", "2026-07-03 09:00:00"),      # 修正後重跑錯誤那一批
+             ("O2", "paid", "2026-07-03 09:00:00")])
+merge(p2, fix); merge(p2, nxt)
+show(f"重跑修正批次＋重播正確批次後 (v{latest(p2)})", p2)
+history(p2)
+
+# ---------- (3) VACUUM 是單向門 ----------
+print("[3] VACUUM")
+try:
+    spark.sql(f"VACUUM delta.`{p2}` RETAIN 0 HOURS")
+    print("  未關閉檢查直接 RETAIN 0 HOURS：沒有被擋")
+except Exception as e:
+    print("  未關閉檢查直接 RETAIN 0 HOURS：", err(e))
+show("VACUUM 前讀 versionAsOf 1（錯誤批次那版）", p2, version=1)
+spark.conf.set("spark.databricks.delta.retentionDurationCheck.enabled", "false")
+spark.sql(f"VACUUM delta.`{p2}` RETAIN 0 HOURS").show(truncate=False)
+show(f"VACUUM 後讀目前版本 (v{latest(p2)})", p2)
+for v in (0, 1):
+    try:
+        show(f"VACUUM 後讀 versionAsOf {v}", p2, version=v)
+    except Exception as e:
+        print(f"  VACUUM 後讀 versionAsOf {v}：", err(e))
+try:
+    spark.sql(f"RESTORE TABLE delta.`{p2}` TO VERSION AS OF 0")
+    print("  VACUUM 後 RESTORE 到 v0：成功"); show("RESTORE 後", p2)
+except Exception as e:
+    print("  VACUUM 後 RESTORE 到 v0：", err(e))
+print("  VACUUM 後 DESCRIBE HISTORY："); history(p2)
+spark.conf.set("spark.databricks.delta.retentionDurationCheck.enabled", "true")
+
+# ---------- (4) 並行衝突 ----------
+print("[4] 兩個 thread 同時 MERGE 同一批 order_id")
+for attempt in range(1, 6):
+    p4 = f"{ROOT}/fact4_{attempt}"
+    batch([(f"O{i}", "created", "2026-07-01 10:00:00") for i in range(1, 6)]).write.format("delta").save(p4)
+    srcA = batch([(f"O{i}", "paid", "2026-07-02 09:00:00") for i in range(1, 6)])
+    srcB = batch([(f"O{i}", "cancelled", "2026-07-02 10:00:00") for i in range(1, 6)])
+    barrier, res = threading.Barrier(2), {}
+    def run(name, src):
+        barrier.wait()
+        try:
+            merge(p4, src); res[name] = "成功"
+        except Exception as e:
+            res[name] = err(e)
+    ts = [threading.Thread(target=run, args=("A", srcA)), threading.Thread(target=run, args=("B", srcB))]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    print(f"  第 {attempt} 次: A={res['A']} | B={res['B']} | 最新版本 v{latest(p4)}")
+    show("    表內容", p4)
+    if any(v != "成功" for v in res.values()):
+        break
+
+# ---------- (5) MERGE 中途失敗 ----------
+print("[5] MERGE 來源在執行中拋例外")
+p5 = f"{ROOT}/fact5"
+batch([("O1", "created", "2026-07-01 10:00:00"),
+       ("O2", "created", "2026-07-01 11:00:00")]).write.format("delta").save(p5)
+v_before = latest(p5); show(f"MERGE 前 (v{v_before})", p5)
+@F.udf("string")
+def boom(order_id, status):
+    if order_id == "O3":
+        raise ValueError("模擬第 3 列處理失敗")
+    return status
+src5 = batch([("O1", "paid", "2026-07-02 09:00:00"),
+              ("O2", "paid", "2026-07-02 09:00:00"),
+              ("O3", "created", "2026-07-02 10:00:00")]).withColumn("order_status", boom("order_id", "order_status"))
+try:
+    merge(p5, src5); print("  MERGE 成功（未預期）")
+except Exception as e:
+    print("  MERGE 例外：", type(e).__name__)
+    print("  訊息含 ValueError：", "模擬第 3 列處理失敗" in str(e))
+show(f"例外後 (最新版本 v{latest(p5)})", p5)
+history(p5)
+
+shutil.rmtree(ROOT)
+spark.stop()
+```
+
+```
+pyspark 4.2.0 delta-spark 4.4.1
+[1] 冪等與重播順序
+  v0 建表: [('O1', 'created', '2026-07-01 10:00:00'), ('O2', 'created', '2026-07-01 11:00:00')]
+  套用 batch1 後 (v1): [('O1', 'paid', '2026-07-02 09:00:00'), ('O2', 'created', '2026-07-01 11:00:00'), ('O3', 'created', '2026-07-02 10:00:00')]
+  同一批 batch1 再跑一次後 (v2): [('O1', 'paid', '2026-07-02 09:00:00'), ('O2', 'created', '2026-07-01 11:00:00'), ('O3', 'created', '2026-07-02 10:00:00')]
+  套用 updated_at 較舊的批次後 (v3): [('O1', 'paid', '2026-07-02 09:00:00'), ('O2', 'created', '2026-07-01 11:00:00'), ('O3', 'created', '2026-07-02 10:00:00')]
+  v0 WRITE {'numOutputRows': '2'}
+  v1 MERGE {'numTargetRowsInserted': '1', 'numTargetRowsUpdated': '1', 'numTargetRowsCopied': '0', 'numOutputRows': '2'}
+  v2 MERGE {'numTargetRowsInserted': '0', 'numTargetRowsUpdated': '0', 'numTargetRowsCopied': '2', 'numOutputRows': '2'}
+  v3 MERGE {'numTargetRowsInserted': '0', 'numTargetRowsUpdated': '0', 'numTargetRowsCopied': '2', 'numOutputRows': '2'}
+[2] 錯誤寫入後 RESTORE
+  錯誤之前 (v0): [('O1', 'paid', '2026-07-02 09:00:00'), ('O2', 'created', '2026-07-01 11:00:00')]
+  套用錯誤批次後 (v1): [('O1', 'cancelled', '2026-07-03 09:00:00'), ('O2', 'cancelled', '2026-07-03 09:00:00')]
+  再套用正確的新批次後 (v2): [('O1', 'cancelled', '2026-07-03 09:00:00'), ('O2', 'cancelled', '2026-07-03 09:00:00'), ('O3', 'created', '2026-07-04 08:00:00')]
++------------------------+--------------------------+-----------------+------------------+------------------+-------------------+
+|table_size_after_restore|num_of_files_after_restore|num_removed_files|num_restored_files|removed_files_size|restored_files_size|
++------------------------+--------------------------+-----------------+------------------+------------------+-------------------+
+|2079                    |2                         |2                |2                 |2147              |2079               |
++------------------------+--------------------------+-----------------+------------------+------------------+-------------------+
+
+  RESTORE TO VERSION AS OF 0 後 (v3): [('O1', 'paid', '2026-07-02 09:00:00'), ('O2', 'created', '2026-07-01 11:00:00')]
+  重跑修正批次＋重播正確批次後 (v5): [('O1', 'completed', '2026-07-03 09:00:00'), ('O2', 'paid', '2026-07-03 09:00:00'), ('O3', 'created', '2026-07-04 08:00:00')]
+  v0 WRITE {'numOutputRows': '2'}
+  v1 MERGE {'numTargetRowsInserted': '0', 'numTargetRowsUpdated': '2', 'numTargetRowsCopied': '0', 'numOutputRows': '2'}
+  v2 MERGE {'numTargetRowsInserted': '1', 'numTargetRowsUpdated': '0', 'numTargetRowsCopied': '0', 'numOutputRows': '1'}
+  v3 RESTORE {}
+  v4 MERGE {'numTargetRowsInserted': '0', 'numTargetRowsUpdated': '2', 'numTargetRowsCopied': '0', 'numOutputRows': '2'}
+  v5 MERGE {'numTargetRowsInserted': '1', 'numTargetRowsUpdated': '0', 'numTargetRowsCopied': '0', 'numOutputRows': '1'}
+[3] VACUUM
+  未關閉檢查直接 RETAIN 0 HOURS： IllegalArgumentException: [DELTA_VACUUM_RETENTION_PERIOD_TOO_SHORT] The specified VACUUM retention period is too low and may corrupt this Delta table if any writes are in progress.
+  VACUUM 前讀 versionAsOf 1（錯誤批次那版）: [('O1', 'cancelled', '2026-07-03 09:00:00'), ('O2', 'cancelled', '2026-07-03 09:00:00')]
+Deleted 7 files and directories in a total of 1 directories.
++----------------------------+
+|path                        |
++----------------------------+
+|file:/tmp/e10_beq8hggc/fact2|
++----------------------------+
+
+  VACUUM 後讀目前版本 (v7): [('O1', 'completed', '2026-07-03 09:00:00'), ('O2', 'paid', '2026-07-03 09:00:00'), ('O3', 'created', '2026-07-04 08:00:00')]
+  VACUUM 後讀 versionAsOf 0： Py4JJavaError <- java.io.FileNotFoundException: File file:/tmp/e10_beq8hggc/fact2/part-00003-1519e43c-e0e2-48bc-93d0-79c10afd8960-c000.snappy.parquet does not exist
+  VACUUM 後讀 versionAsOf 1： Py4JJavaError <- java.io.FileNotFoundException: File file:/tmp/e10_beq8hggc/fact2/part-00000-1c7dc372-24f1-4114-be91-08285800b618-c000.snappy.parquet does not exist
+  VACUUM 後 RESTORE 到 v0： IllegalArgumentException: Not all files from version 0 are available in file system.
+  VACUUM 後 DESCRIBE HISTORY：
+  v0 WRITE {'numOutputRows': '2'}
+  v1 MERGE {'numTargetRowsInserted': '0', 'numTargetRowsUpdated': '2', 'numTargetRowsCopied': '0', 'numOutputRows': '2'}
+  v2 MERGE {'numTargetRowsInserted': '1', 'numTargetRowsUpdated': '0', 'numTargetRowsCopied': '0', 'numOutputRows': '1'}
+  v3 RESTORE {}
+  v4 MERGE {'numTargetRowsInserted': '0', 'numTargetRowsUpdated': '2', 'numTargetRowsCopied': '0', 'numOutputRows': '2'}
+  v5 MERGE {'numTargetRowsInserted': '1', 'numTargetRowsUpdated': '0', 'numTargetRowsCopied': '0', 'numOutputRows': '1'}
+  v6 VACUUM START {}
+  v7 VACUUM END {}
+[4] 兩個 thread 同時 MERGE 同一批 order_id
+  第 1 次: A=ConcurrentAppendException: [DELTA_CONCURRENT_APPEND.WITHOUT_HINT] Transaction conflict detected. a concurrent MERGE added data to table delta.`file:/tmp/e10_beq8hggc/fact4_1` committed at version 1. The concurrent operation mod | B=成功 | 最新版本 v1
+      表內容: [('O1', 'cancelled', '2026-07-02 10:00:00'), ('O2', 'cancelled', '2026-07-02 10:00:00'), ('O3', 'cancelled', '2026-07-02 10:00:00'), ('O4', 'cancelled', '2026-07-02 10:00:00'), ('O5', 'cancelled', '2026-07-02 10:00:00')]
+[5] MERGE 來源在執行中拋例外
+  MERGE 前 (v0): [('O1', 'created', '2026-07-01 10:00:00'), ('O2', 'created', '2026-07-01 11:00:00')]
+  MERGE 例外： PythonException
+  訊息含 ValueError： True
+  例外後 (最新版本 v0): [('O1', 'created', '2026-07-01 10:00:00'), ('O2', 'created', '2026-07-01 11:00:00')]
+  v0 WRITE {'numOutputRows': '2'}
+```
+
+各情境結論（只寫輸出能支持的內容）：
+
+- `[1]` 冪等與重播順序：同一批 batch1 再跑一次，表內容不變，但**版本號仍前進**（v1 → v2），`DESCRIBE HISTORY` 記為 MERGE、`numTargetRowsUpdated` 0、`numTargetRowsCopied` 2，也就是條件不成立時不改值，但檔案仍被重寫一次。套用 `updated_at` 較舊的批次（O1 `created`、07-01 10:30）後 O1 仍是 `paid`，狀態沒有倒退（v3 同樣 0 更新、2 copied）。
+- `[2]` RESTORE：`RESTORE TABLE ... TO VERSION AS OF 0` 把錯誤批次（v1，O1、O2 寫成 `cancelled`）退回，但錯誤之後那個正確批次（v2 新增的 O3）**也一起消失**；RESTORE 本身成為新版本 v3，不是刪掉 v1、v2。之後重跑修正批次與重播 O3 那批（v4、v5），內容才正確。
+- `[3]` VACUUM：未關閉檢查直接 `RETAIN 0 HOURS` 被擋，例外為 `IllegalArgumentException: [DELTA_VACUUM_RETENTION_PERIOD_TOO_SHORT]`。關閉 `spark.databricks.delta.retentionDurationCheck.enabled` 後 VACUUM 刪了 7 個檔案；目前版本仍可讀，但 `versionAsOf 0`、`versionAsOf 1` 讀取失敗（最底層例外 `java.io.FileNotFoundException`，parquet 檔不存在），`RESTORE ... TO VERSION AS OF 0` 失敗（`IllegalArgumentException: Not all files from version 0 are available in file system.`）。`DESCRIBE HISTORY` 仍列出 v0～v5，並多了 v6 `VACUUM START`、v7 `VACUUM END`：歷史紀錄還在，舊版本的資料檔已經沒了。
+- `[4]` 並行衝突：兩個 thread 以 `threading.Barrier` 同時起跑，對同一批 O1～O5 做 MERGE，第 1 次就重現：一個成功、另一個得到 `ConcurrentAppendException`（`[DELTA_CONCURRENT_APPEND.WITHOUT_HINT]`），表只前進到 v1，內容是成功那一方的值。失敗的一方沒有寫入任何東西，需要由呼叫端重試。哪一方勝出不固定：收錄的這次是 B 勝；先前兩次試跑（輸出未收錄）分別是 B 勝、A 勝。
+- `[5]` MERGE 中途失敗：來源的 UDF 對 O3 拋 `ValueError`，MERGE 拋出 `PythonException`（訊息含該 ValueError），之後最新版本仍是 v0、內容不變，`DESCRIBE HISTORY` 只有 v0 WRITE，沒有留下半個版本。
+
+### `[6]` 錯誤寫入後不先 RESTORE、直接重跑修正批次
+
+另一支小腳本，同樣的 MERGE 條件。O1 先寫入 `pending`（T1），錯誤批次把它寫成 `cancelled`（T2），之後不 RESTORE，直接套用修正批次 `paid`：`[6a]` 的修正批次 `updated_at` 同為 T2（同一筆來源資料修正後重送），`[6b]` 對照組用 T3（> T2）。
+
+執行：在 `LionTest/` 執行 `uv run python -u /tmp/partb_e10/rerun_without_restore.py 2>/dev/null`
+
+```python
+"""E10 [6]：錯誤寫入後不先 RESTORE、直接重跑修正批次。用法：uv run python rerun_without_restore.py"""
+import shutil, tempfile
+from datetime import datetime as dt
+from delta import configure_spark_with_delta_pip
+from delta.tables import DeltaTable
+from pyspark.sql import SparkSession
+
+b = (SparkSession.builder.master("local[2]").appName("partb_e10_6")
+     .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+     .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+     .config("spark.ui.enabled", "false"))
+spark = configure_spark_with_delta_pip(b).getOrCreate()
+spark.sparkContext.setLogLevel("OFF")
+
+SCHEMA = "order_id string, order_status string, updated_at timestamp"
+ROOT = tempfile.mkdtemp(dir="/tmp", prefix="e10_6_")
+T1, T2, T3 = "2026-07-01 10:00:00", "2026-07-02 09:00:00", "2026-07-03 09:00:00"
+
+def batch(rows):
+    return spark.createDataFrame([(o, s, dt.fromisoformat(u)) for o, s, u in rows], SCHEMA)
+
+def merge(path, src):
+    (DeltaTable.forPath(spark, path).alias("t")
+     .merge(src.alias("s"), "t.order_id = s.order_id")
+     .whenMatchedUpdateAll(condition="s.updated_at > t.updated_at")
+     .whenNotMatchedInsertAll()
+     .execute())
+
+def show(tag, path):
+    rows = [(x.order_id, x.order_status, str(x.updated_at)) for x in spark.read.format("delta").load(path).collect()]
+    m = DeltaTable.forPath(spark, path).history(1).collect()[0]
+    upd = (m.operationMetrics or {}).get("numTargetRowsUpdated", "-")
+    print(f"  {tag} (v{m.version} {m.operation}, numTargetRowsUpdated={upd}): {rows}")
+
+for label, fix_ts in (("[6a] 修正批次 updated_at = T2（與錯誤批次相同）", T2),
+                      ("[6b] 對照：修正批次 updated_at = T3（> T2）", T3)):
+    print(label)
+    p = f"{ROOT}/fact_{fix_ts[8:10]}"
+    batch([("O1", "pending", T1)]).write.format("delta").save(p)
+    show("v0 寫入", p)
+    merge(p, batch([("O1", "cancelled", T2)]))       # 錯誤批次：O1 狀態寫錯
+    show("套用錯誤批次後", p)
+    merge(p, batch([("O1", "paid", fix_ts)]))        # 修正批次：同一筆修正後重送，不先 RESTORE
+    show("直接套用修正批次後", p)
+
+shutil.rmtree(ROOT)
+spark.stop()
+```
+
+```
+[6a] 修正批次 updated_at = T2（與錯誤批次相同）
+  v0 寫入 (v0 WRITE, numTargetRowsUpdated=-): [('O1', 'pending', '2026-07-01 10:00:00')]
+  套用錯誤批次後 (v1 MERGE, numTargetRowsUpdated=1): [('O1', 'cancelled', '2026-07-02 09:00:00')]
+  直接套用修正批次後 (v2 MERGE, numTargetRowsUpdated=0): [('O1', 'cancelled', '2026-07-02 09:00:00')]
+[6b] 對照：修正批次 updated_at = T3（> T2）
+  v0 寫入 (v0 WRITE, numTargetRowsUpdated=-): [('O1', 'pending', '2026-07-01 10:00:00')]
+  套用錯誤批次後 (v1 MERGE, numTargetRowsUpdated=1): [('O1', 'cancelled', '2026-07-02 09:00:00')]
+  直接套用修正批次後 (v2 MERGE, numTargetRowsUpdated=1): [('O1', 'paid', '2026-07-03 09:00:00')]
+```
+
+- `[6]` 結論：修正批次的 `updated_at` 與錯誤批次相同（T2）時，`s.updated_at > t.updated_at` 不成立，MERGE 仍提交了 v2，但 `numTargetRowsUpdated=0`，**O1 最後仍是錯誤的 `cancelled`**。對照組修正批次用 T3 時，`numTargetRowsUpdated=1`，O1 被覆蓋成 `paid`。
