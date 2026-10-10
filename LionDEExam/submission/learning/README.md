@@ -10,6 +10,11 @@
 
 圖例：📄 已有筆記｜○ 本專案碰過、還沒寫筆記（之後照 concept-note 流程挑來寫）
 
+### 0. 儲存與架構（Storage）
+| 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
+|---|---|---|---|
+| Data lake、warehouse、lakehouse：資料存成什麼形式 | 📄 [data-lake-vs-warehouse.md](data-lake-vs-warehouse.md) | `buggy_pipeline.py` 的 `LAKEHOUSE`、`format("delta")` | B、C |
+
 ### 1. 資料建模（Transformation／Data architecture）
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
 |---|---|---|---|
@@ -55,7 +60,7 @@
 | 重跑與失敗處理：批次參數必填、步驟冪等、批次狀態 | ○ | Part B #10 `def main(batch_date: str = "day1"):` | A-2、B |
 
 ### 題目會考、還沒碰到
-星型模型與維度鍵設計（A-1）、資料品質報告的寫法（A-3）、Lakehouse vs Warehouse 等架構取捨與語意層（C）、以及三選一模組各自的主題：效能瓶頸分析（D）、LLM-as-judge 評分（E）、特徵洩漏（F）。做到時再補進上面的分類。
+星型模型與維度鍵設計（A-1）、資料品質報告的寫法（A-3）、架構取捨與語意層（C）、以及三選一模組各自的主題：效能瓶頸分析（D）、LLM-as-judge 評分（E）、特徵洩漏（F）。做到時再補進上面的分類。
 
 ## 怎麼新增
 

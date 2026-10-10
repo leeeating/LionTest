@@ -6,20 +6,20 @@
 
 嚴重度定義見第 3 節：P0 資料錯誤或遺失；P1 特定情境出錯或讓問題無法被發現；P2 效能或可維護性。
 
-| # | 嚴重度 | 函式／片段 | 問題 | 小節 |
+| # | 嚴重度 | 函式 | 問題 | 小節 |
 |---|---|---|---|---|
-| 1 | P0 | `convert_currency`：`orders["currency"] == fx["currency"]` | 匯率 inner join 丟掉全部 TWD 訂單 | 4.1 |
-| 2 | P0 | `update_dim_member`：`"replaceWhere", "member_id IS NOT NULL"` | SCD2 寫入把整張 dim_member 覆寫成只剩變更會員 | 4.3 |
-| 3 | P0 | `write_fact`：`mode("append")` | 事實表用 append：重跑會重複，跨日訂單更新也會重複 | 4.2 |
-| 4 | P0 | `build_fact`：`converted.join(members, "member_id", "left")` | 事實表 join 的是原始 members 快照，不是維度表，會一對多放大 | 4.2 |
-| 5 | P0 | `clean_orders`：`dropDuplicates(["order_id"])`、`orderBy(F.col("order_created_at").desc())` | 去重保留的是任意一筆，不是最新狀態 | 4.2 |
-| 6 | P1 | `update_dim_member`：`dim.alias("d").join(latest_snap.alias("s"), "member_id")` | SCD2 邏輯不完整：沒有關閉舊版本、新會員不會被寫入、null 比較會漏掉變更 | 4.3 |
-| 7 | P1 | `clean_orders`：`filter(F.col("amount") > 0)` | 非正數金額過濾靜默丟掉 0 元和負數訂單 | 4.1 |
-| 8 | P1 | `build_fact`：`with_member.join(products, "product_id", "inner")` | 產品 inner join 靜默丟單 | 4.1 |
-| 9 | P1 | `write_fact`：`load(f"{LAKEHOUSE}/fact/fact_order").collect()`；`main()`：`資料品質已確保` | 「驗證」沒有任何斷言，還把整張事實表 collect 到 driver | 4.4 |
-| 10 | P1 | `main()`：`def main(batch_date: str = "day1"):` | 執行順序與失敗處理：dim 先寫、fact 後寫，不是原子操作；batch_date 預設值是 "day1" | 4.4 |
-| 11 | P2 | `convert_currency`：`to_twd_udf = F.udf(to_twd, DoubleType())` | Python UDF 做乘法，慢，而且 null 被當成 0 | 4.5 |
-| 12 | P2 | `load_sources`：`spark.read.option("header", True).csv(`（4 處） | CSV 不指定 schema，所有欄位都是字串；金額比較靠隱式轉型（ANSI 關閉時靜默濾掉、開啟時報錯） | 4.5 |
+| 1 | P0 | `convert_currency` | 匯率 inner join 丟掉全部 TWD 訂單 | 4.1 |
+| 2 | P0 | `update_dim_member` | SCD2 寫入把整張會員維度表覆寫成只剩變更會員 | 4.3 |
+| 3 | P0 | `write_fact` | 事實表用 append，重跑或跨日更新都會重複 | 4.2 |
+| 4 | P0 | `build_fact` | 事實表 join 原始會員快照而非維度表，一對多放大 | 4.2 |
+| 5 | P0 | `clean_orders` | 去重保留任意一筆，不是最新狀態 | 4.2 |
+| 6 | P1 | `update_dim_member` | SCD2 不完整：舊版本沒關閉、新會員沒寫入、null 變更會漏 | 4.3 |
+| 7 | P1 | `clean_orders` | 靜默丟掉 0 元與負數金額的訂單 | 4.1 |
+| 8 | P1 | `build_fact` | 產品 inner join 靜默丟掉對不到產品的訂單 | 4.1 |
+| 9 | P1 | `write_fact`、`main` | 「驗證」沒有斷言，還把整張事實表收到 driver | 4.4 |
+| 10 | P1 | `main` | 先寫 dim 再寫 fact，不是原子操作；batch_date 預設為 day1 | 4.4 |
+| 11 | P2 | `convert_currency` | Python UDF 做乘法，慢，且 null 被當成 0 | 4.5 |
+| 12 | P2 | `load_sources` | CSV 不指定 schema，金額比較靠隱式轉型 | 4.5 |
 
 證據：所有筆數的查詢與輸出見 `part_b/evidence.md`；資料欄位與值域見 `notes/dataset/dictionary.md`。
 

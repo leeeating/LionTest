@@ -1,0 +1,98 @@
+# Data lake、data warehouse、lakehouse
+資料存在哪裡、用什麼形式存：warehouse 把資料放進專門給分析用的資料庫，lake 把資料當開放格式的檔案放在便宜的雲端儲存，lakehouse 是在 lake 的檔案上補回資料庫的能力。
+
+## 白話版
+- **Data warehouse（資料倉儲）像私人廚房**：食材（資料）收進這個廚房自己的櫃子（產品專有的格式），只有這個廚房的廚師（查詢引擎）能用。寫進去之前要先定好格式（schema），進來的資料乾淨、好查。它是**專門給分析／報表用的資料庫**：資料從各個業務系統整理後匯入，跟應用程式日常讀寫用的資料庫（OLTP，例如訂單系統背後的 MySQL）不是同一個東西。例：Snowflake、BigQuery、Amazon Redshift。
+- **Data lake（資料湖）像公共倉庫**：資料以檔案（CSV、Parquet）放在雲端儲存（AWS S3、Azure Blob／ADLS Gen2、OneLake），什麼格式都能先丟進來。誰要用就自己帶引擎來讀，Spark、DuckDB 讀的都是同一批檔案。代價是檔案沒有 `UPDATE`，寫到一半壞掉也不能回滾。
+- **Lakehouse**：lake 的檔案加上一本「記帳本」（Delta Lake、Iceberg 這類表格式）。資料檔只新增不修改，記帳本記錄每次寫入後哪些檔案算數，於是有了 `UPDATE`／`MERGE`、寫入失敗不會壞、可以回到舊版本（time travel）。
+
+**最根本的差別**：資料是鎖在單一產品的專有格式裡（warehouse），還是以開放格式的檔案存放、任何引擎都能讀（lake、lakehouse）。「儲存與運算分開」不是分界線，雲端 warehouse 也做得到。
+
+用 Python 想像 lakehouse 的記帳本：
+
+```python
+log = [
+    {"version": 0, "add": ["a.parquet"]},
+    {"version": 1, "add": ["b.parquet"], "remove": ["a.parquet"]},  # 更新＝寫新檔＋標記舊檔作廢
+]
+# 讀最新版只讀 b.parquet；time travel 到 version 0 就讀 a.parquet（舊檔其實還在）
+```
+
+| | Warehouse | Lake | Lakehouse |
+|---|---|---|---|
+| 資料形式 | 資料庫內部格式 | 檔案 | 檔案＋交易紀錄 |
+| 什麼時候定 schema | 寫入前 | 讀取時 | 寫入時檢查（可設定允許 schema 演進） |
+| 能不能 `UPDATE` | 能 | 不能，只能重寫檔案 | 能 |
+| 換引擎 | 不行，綁定該產品 | 可以 | 可以 |
+| 成本 | 依產品而定（雲端 warehouse 多半也把儲存與運算分開計費） | 儲存便宜，運算用時才開 | 同 lake |
+
+**雲端儲存本身不等於 lake**：Azure Blob、AWS S3 是放檔案的物件儲存，是 lake 的地基；照「原始資料以開放格式檔案集中存放、各引擎來讀」的方式使用，才叫 data lake。Azure 的三個名字：
+
+| 名字 | 是什麼 |
+|---|---|
+| Azure Blob Storage | 基本的物件儲存；資料夾是假的，只是檔名裡有 `/` |
+| ADLS Gen2（Azure Data Lake Storage） | Blob 加上真正的資料夾（hierarchical namespace）：改資料夾名稱一步完成、可對資料夾設權限；做 lake 建議用它 |
+| OneLake | Microsoft Fabric 的儲存層，建在 Azure Data Lake Storage 上、相容 ADLS Gen2 的 API；名字叫 lake，本質仍是儲存，加上 Fabric 的權限治理與多引擎共用。路徑開頭 `abfss://` 是 ADLS Gen2 的路徑寫法（ABFS driver 的 URI scheme，s＝走 TLS 加密） |
+
+來源見文末「官方文件」。
+
+## 什麼時候用、什麼時候不要用
+- **Warehouse**：資料量中等、主要給 BI 報表查、團隊熟 SQL、想要少維運。
+- **Lake**：原始資料先落地保存（不知道之後要怎麼用）、非結構化資料（log、圖片）。只當原料區，不直接給報表查。
+- **Lakehouse**：要在 lake 上做每日增量更新（MERGE）、需要可回溯版本。
+- 實務上常混用：原始檔進 lake 的 landing 區，整理後寫成 lakehouse 的表，再給 BI 查。
+
+## 最小可跑範例
+DuckDB 一支程式示範兩種存法（`uv run python demo.py`）：
+
+```python
+import duckdb
+
+# 資料湖：資料就是一個檔案，查詢引擎直接讀檔
+duckdb.sql("COPY (SELECT * FROM (VALUES ('O1', 100), ('O2', 250)) t(order_id, amount)) TO 'orders.parquet'")
+print(duckdb.sql("SELECT sum(amount) AS total FROM 'orders.parquet'").fetchall())
+
+# 資料倉儲：資料在資料庫裡，先定義 schema 才能寫
+con = duckdb.connect()  # 示範用 in-memory 資料庫，重跑不會殘留
+con.sql("CREATE TABLE orders (order_id VARCHAR PRIMARY KEY, amount INTEGER)")
+con.sql("INSERT INTO orders SELECT * FROM 'orders.parquet'")
+con.sql("UPDATE orders SET amount = 300 WHERE order_id = 'O2'")
+print(con.sql("SELECT * FROM orders ORDER BY order_id").fetchall())
+try:
+    con.sql("INSERT INTO orders VALUES ('O3', 'abc')")
+except Exception as e:
+    print(type(e).__name__)
+```
+
+實際輸出（duckdb 1.5.6）：
+
+```
+[(350,)]
+[('O1', 100), ('O2', 300)]
+ConversionException
+```
+
+- 第一行：沒有建任何表，直接對 `orders.parquet` 這個檔案下 SQL。
+- 第二行：資料庫裡的表可以 `UPDATE`。
+- 第三行：schema 寫死 `amount INTEGER`，型別不對的資料寫不進去；lake 沒有人強制每個新檔都符合同一個 schema（CSV 甚至沒有型別）。這裡示範的是「寫入前定 schema vs 讀取時才定」，lakehouse 也能擋，所以這不是 lake 和 warehouse 的根本差別。
+
+Delta 的記帳本沒有在本機實跑（需要 Spark＋Java），上面的 Python 只是示意。
+
+## 常見的坑
+- **把 lake 當成 warehouse 用**：CSV 不定 schema，所有欄位都是字串，金額比大小靠隱式轉型（Part B #12）。
+- **以為 lakehouse 的舊版本永遠都在**：VACUUM 會真正刪掉作廢超過保留期的舊檔，刪了就不能 time travel；就算沒跑 VACUUM，記帳本本身超過保留期被清掉，舊版本也一樣回不去（Part B #2 的 dim 被覆寫，只在保留期內、VACUUM 之前救得回來）。兩個保留期的預設值（一般說法是 7 天與 30 天）未證實。
+- **lake 裡的原始檔被覆蓋或刪掉**：之後表寫壞了就沒有原料可以重做。
+
+## 本專案出處
+- `buggy_pipeline.py` 的 `LAKEHOUSE = "abfss://` 開頭的路徑：指向 Microsoft Fabric（OneLake）的 lakehouse。
+- `load_sources()` 從 `landing/` 讀 CSV（lake 的原料區）；`update_dim_member()`、`write_fact()` 寫 `format("delta")`（lakehouse 的表）。
+- 題目 Part C 考 Lakehouse vs Warehouse 的架構取捨。
+
+## 官方文件
+未證實：這次沒有讀官方文件，內容是一般定義。分類說法可對照 Reis & Housley《Fundamentals of Data Engineering》的 storage 章節；Delta 的 transaction log 與 VACUUM 預設保留期，之後寫 Part C 時要查 Delta Lake 官方文件確認。
+
+Azure 儲存（驗收 agent 查證過）：
+- Blob 的虛擬資料夾與 hierarchical namespace（原子目錄操作）：https://learn.microsoft.com/en-us/azure/storage/blobs/data-lake-storage-namespace
+- ADLS Gen2 的 ACL：https://learn.microsoft.com/en-us/azure/storage/blobs/data-lake-storage-access-control
+- OneLake 建在 Azure Data Lake Storage 上：https://learn.microsoft.com/en-us/fabric/onelake/onelake-overview
+- `abfss://`（ABFS driver）：https://learn.microsoft.com/en-us/azure/storage/blobs/data-lake-storage-abfs-driver
