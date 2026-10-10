@@ -1,0 +1,49 @@
+# SCD（Slowly Changing Dimension）名詞總覽：Type 0～4 與 6
+SCD（**緩慢變化維度**）是「維度表裡的屬性改了，要怎麼處理舊值」的一組做法；Type 只是編號，差在**舊值保不保留、保在哪**。本篇涵蓋 Type 0、1、2、3、4、6；Type 5（Type 4 mini-dimension 加上指向目前 mini 列的 Type 1 參照，[Kimball](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-5/)）與 Type 7（Type 1／Type 2 兩種視角共用一張維度，[Kimball](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-7/)）本篇未涵蓋。
+
+## 白話版
+會員王小明 4/30 是銀卡，5/31 升金卡。5/15 的訂單要答「銀卡」還是「金卡」？看你選哪個 Type：
+
+- **Type 0**：永遠是第一次的銀卡，不管後來怎樣。
+- **Type 1**：`member["M001"] = "金卡"`（dict 覆寫），舊值消失，5/15 的訂單也變金卡。
+- **Type 2**：`versions.append(...)`（list append），銀卡、金卡各一列、各有有效期間，5/15 答銀卡。
+- **Type 3**：多一欄 `previous_level`，只記「上一個」值，再早的就沒了。
+
+Type 2 的細節（三件事、初始載入的坑）見 [SCD2 說明](../notes/part_b/scd2.md)；Type 2 怎麼 join 事實見 [point-in-time-join.md](point-in-time-join.md)。
+
+## 名詞表
+| 名詞 | 說明 |
+|---|---|
+| Dimension／Fact | 維度表描述「誰、什麼」（會員、產品），變化慢；事實表記錄「發生了什麼」（訂單），一直新增。 |
+| Type 0 | 屬性永不改變，事實永遠歸在原始值。**用**：出生日期、首次註冊管道這類本來就不該變的值。 |
+| Type 1 | 直接覆蓋舊值，不留歷史。**用**：更正錯字，或只在乎目前值。 |
+| Type 2 | 新增一列保留舊版，配新的 surrogate key。**用**：需要「當時」的屬性（會員等級、所屬部門）。 |
+| Type 3 | 加新欄位存舊值，主欄位覆蓋成新值。**用**：只需比較「新舊兩個值」，例如組織改制前後對照。 |
+| Type 4 | 把變動快的屬性拆到另一張 mini-dimension（有自己的 key），事實表同時帶主維度與 mini 兩個 key。mini 的每一列通常是一種屬性組合（常為分級後的值）。**用**：屬性變很頻繁，放同一張表 Type 2 會暴增列數。 |
+| Type 6 | Type 2 加上每列都內嵌「目前值」（Type 1 覆蓋），可用「當時」或「現在」分組。**用**：同一份報表兩種看法都要。 |
+| natural key（business key）| 業務上本來就有的識別碼，例如 `member_id`；Type 2 下會重複出現多列。 |
+| surrogate key | 倉儲自己產生、無業務意義的代理鍵；Type 2 每個版本一個，事實表可存它來鎖定版本。 |
+| `valid_from`／`valid_to`／`is_current` | Type 2 的有效期間欄位：版本從何時起、到何時止（目前版本常填 `9999-12-31`）、是否為最新一版。 |
+| 半開區間 | `valid_from <= t < valid_to`，含起不含迄，邊界日只會落在一版，不會重複配對。 |
+| point-in-time join | 讓每筆事實對到它發生「當時」的維度版本，見 [point-in-time-join.md](point-in-time-join.md)。 |
+| snapshot（快照）| 每次整批抄一份來源的當下全貌（如每月一份名冊）；它是 SCD2 的**原料**，不是 SCD2 本身。 |
+
+## 比較表
+| Type | 保留歷史？ | 表怎麼長大 | 查「當時」的值 |
+|---|---|---|---|
+| 0 | 只有原始值 | 不長 | 簡單（永遠是原始值） |
+| 1 | 否 | 不長，原地覆蓋 | 做不到 |
+| 2 | 完整 | 每次變更多一列 | 要 point-in-time join，中等 |
+| 3 | 只有上一版 | 不長，多一欄 | 只能答新／舊兩種 |
+| 4 | 部分：歷史靠事實表上的 mini key 保留；期間內沒有事實發生的變更不會被記到 | 主表不長；mini 表只在出現新屬性組合時才長 | 看事實列帶的 mini key，簡單，但只對有事實的時點成立 |
+| 6 | 完整＋目前值 | 同 Type 2，更新時要改整組舊列 | 兩種都簡單，但寫入較複雜 |
+
+## 本專案出處
+- `members.csv` 是多次快照（`extract_date` 不同），989 人有多筆，是做 Type 2 的原料。
+- `buggy_pipeline` 的 `update_dim_member` 自稱 SCD2，實際沒有 `valid_to`／`is_current`，且寫入用 `"replaceWhere", "member_id IS NOT NULL"`，整張表覆寫，連 Type 1 都不如。分析見 [scd2.md](../notes/part_b/scd2.md)。
+
+## 官方文件
+- 已讀（Kimball Group, Dimensional Modeling Techniques）：[Type 0](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-0/)、[Type 1](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-1/)、[Type 2](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-2/)、[Type 3](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-3/)、[Type 4](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-4/)、[Type 6](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-6/)。
+- Kimball 定義對照：Type 0 值永不變；Type 1 覆蓋；Type 2 新增列、配新 surrogate key，加 effective／expiration／current indicator 三欄；Type 3 加新欄位存舊值；Type 4 拆成 mini-dimension；Type 6 是 Type 2 內嵌 Type 1 目前值；Type 5、7 的定義見開頭連結（已讀）。
+- 未證實：Type 4 的「mini 每列是一種屬性組合、新組合才長、無事實的變更不被記錄」，Kimball type-4 頁沒寫（頁面只說明拆出變動快的屬性、mini 有自己的主鍵、兩個 key 都放進事實表），此為依 mini-dimension 設計的業界理解。
+- 未證實：各 Type 的「什麼時候用」是依各定義推得的使用情境，非 Kimball 原文；natural key、snapshot、`is_current` 的命名與 `9999-12-31` 填法、半開區間，這次沒讀到 Kimball 對應的定義頁（SCD 總覽頁回 404），為通用業界慣例。
