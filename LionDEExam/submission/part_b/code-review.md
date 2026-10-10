@@ -33,6 +33,23 @@
 
 每天執行一次的訂單 ETL：把當天的增量訂單 CSV 整理成事實表 `fact_order`，給下游的 BI 和 AI 應用查詢；同時維護會員維度表 `dim_member`（SCD Type 2，保留會員屬性的歷史版本）。依據是程式開頭的模組 docstring（`本管線由 AI Coding Agent 生成`）和 `main()`（`def main(batch_date: str = "day1"):`）。
 
+這支程式在整條資料流中的位置：
+
+```mermaid
+flowchart LR
+    SRC["來源系統<br/>（推測為訂單 OLTP 資料庫）"] -.->|匯出 CSV，程式範圍外| L
+    subgraph OL["OneLake lakehouse（LAKEHOUSE 路徑）"]
+        L["landing/<br/>原始 CSV"]
+        T["dim/dim_member、fact/fact_order<br/>Delta 表"]
+    end
+    L --> P["buggy_pipeline.py<br/>Spark 整理"]
+    P -->|寫入| T
+    T -.->|讀回既有 dim_member、寫完讀回 fact_order| P
+    T --> D["下游 BI、AI 應用"]
+```
+
+依據是常數 `LAKEHOUSE = "abfss://lakehouse@onelake`：原始 CSV 和 Delta 表都放在同一個 OneLake lakehouse 底下，差別只在 `landing/` 是原檔、`dim/`、`fact/` 是 Delta 表（`format("delta")`）。程式讀 `landing/` 的 CSV（`load_sources()` 的 `f"{LAKEHOUSE}/landing/`），也讀既有的 Delta 表：`update_dim_member()` 先讀既有的 `dim_member` 再改寫（#2、#6 的成因），`write_fact()` 寫完再讀回 `fact_order`。CSV 由哪個系統匯出，程式與題目都沒有說明，上圖的來源是推測。
+
 `main()` 依序執行 6 步：
 
 ```mermaid
