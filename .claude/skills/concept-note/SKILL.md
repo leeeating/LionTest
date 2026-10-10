@@ -13,7 +13,7 @@ description: 在討論中挑出可帶到其他專案的 SWE 觀念（套件／�
 2. **AI 提出 3～5 個選項**，從目前的討論與本專案素材挑（`ai-collab/process-log.md`、`part_b/`、`notes/`、`part_b/evidence.md`、對話脈絡）。每個選項一行：
    `觀念名稱｜為什麼可以帶到其他專案｜在本專案哪裡出現`
 3. **使用者選**（可多選，也可自己提）。
-4. **AI 寫筆記**，一個觀念一份。寫之前先看 `LionDEExam/submission/learning/README.md` 的索引，已有的觀念改成補充原檔，不重開新檔；寫完把該觀念加進索引表。
+4. **AI 寫筆記**，一個觀念一份。寫之前先看 `LionDEExam/submission/learning/README.md` 的「DE 觀念地圖」，已有筆記的觀念改成補充原檔，不重開新檔；寫完把地圖中對應的 ○ 改成 📄，新觀念加進合適的分類。提選項時優先從地圖的 ○ 挑。
 
 ## 選題偏好
 
