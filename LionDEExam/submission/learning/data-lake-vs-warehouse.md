@@ -18,6 +18,15 @@ log = [
 # 讀最新版只讀 b.parquet；time travel 到 version 0 就讀 a.parquet（舊檔其實還在）
 ```
 
+所以可以把 lakehouse 記成「lake ＋ 記錄哪些檔案算數的交易紀錄」。注意它和一般說的 changelog 不同：
+
+| | 記什麼 | 例子 |
+|---|---|---|
+| Delta 的 transaction log | 每個版本由**哪些檔案**組成（add／remove），以及 schema 等 metadata | `_delta_log/` 裡的 JSON |
+| 一般的 changelog（CDC） | **每一列**的變更，例如某張訂單從 pending 改成 completed | CDC 工具讀取的 MySQL binlog（ROW 格式） |
+
+改一列資料時，Delta 預設會重寫那一列所在的整個檔案，再在記帳本上用新檔換掉舊檔；開啟 deletion vectors 時，改成另外記一份「哪些列作廢」的標記，不重寫原檔。Delta 另有選用的 Change Data Feed 可以輸出逐列變更，但那是額外功能，不是記帳本本身的內容。
+
 | | Warehouse | Lake | Lakehouse |
 |---|---|---|---|
 | 資料形式 | 資料庫內部格式 | 檔案 | 檔案＋交易紀錄 |
@@ -35,6 +44,18 @@ log = [
 | OneLake | Microsoft Fabric 的儲存層，建在 Azure Data Lake Storage 上、相容 ADLS Gen2 的 API；名字叫 lake，本質仍是儲存，加上 Fabric 的權限治理與多引擎共用。路徑開頭 `abfss://` 是 ADLS Gen2 的路徑寫法（ABFS driver 的 URI scheme，s＝走 TLS 加密） |
 
 來源見文末「官方文件」。
+
+**warehouse 常見的產品**：多半按欄存（columnar）、擅長大量加總的 OLAP 資料庫；MySQL、PostgreSQL、MongoDB 這類給應用程式日常讀寫的 OLTP 資料庫不屬於這裡。
+
+| 類型 | 產品 |
+|---|---|
+| 雲端 warehouse | Snowflake、BigQuery（Google）、Redshift（AWS） |
+| Microsoft | Fabric Warehouse、Azure Synapse |
+| 自架／開源 | ClickHouse、StarRocks、Apache Doris |
+| 傳統地端 | Teradata（傳統列存，後來加入 columnar 選項）、Vertica |
+| 單機 | DuckDB：不是 warehouse 服務，而是單機的 OLAP 引擎，查法和 warehouse 一樣 |
+
+產品清單是一般知識，未逐一查官方文件。
 
 ## 什麼時候用、什麼時候不要用
 - **Warehouse**：資料量中等、主要給 BI 報表查、團隊熟 SQL、想要少維運。
@@ -89,7 +110,11 @@ Delta 的記帳本沒有在本機實跑（需要 Spark＋Java），上面的 Pyt
 - 題目 Part C 考 Lakehouse vs Warehouse 的架構取捨。
 
 ## 官方文件
-未證實：這次沒有讀官方文件，內容是一般定義。分類說法可對照 Reis & Housley《Fundamentals of Data Engineering》的 storage 章節；Delta 的 transaction log 與 VACUUM 預設保留期，之後寫 Part C 時要查 Delta Lake 官方文件確認。
+lake／warehouse／lakehouse 的分類是一般定義，未讀官方文件，可對照 Reis & Housley《Fundamentals of Data Engineering》的 storage 章節。VACUUM 與 log 的預設保留期未證實，寫 Part C 時要查 Delta Lake 官方文件確認。
+
+Delta（驗收 agent 查證過）：
+- transaction log 的 action（add、remove、metaData、cdc 等）：https://github.com/delta-io/delta/blob/master/PROTOCOL.md
+- deletion vectors：https://docs.delta.io/latest/delta-deletion-vectors.html
 
 Azure 儲存（驗收 agent 查證過）：
 - Blob 的虛擬資料夾與 hierarchical namespace（原子目錄操作）：https://learn.microsoft.com/en-us/azure/storage/blobs/data-lake-storage-namespace
