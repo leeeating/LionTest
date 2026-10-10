@@ -61,4 +61,4 @@ LionTest/
 
 ## AI 協作怎麼記錄
 
-每一項任務都依六個步驟進行：使用者先看 → 拆解 → 委派 → 驗證 → 修正 → 使用者定案。過程記在 `LionDEExam/submission/ai-collab/process-log-*.md`，包括 AI 在哪裡出錯、是誰發現的、怎麼修正的。完整對話紀錄在 `ai-collab/transcripts/`。
+以六步驟為工作方法：使用者先看 → 拆解 → 委派 → 驗證 → 修正 → 使用者定案；例外（例如跳過「你先看」）記在 process-log。過程記在 `LionDEExam/submission/ai-collab/process-log.md`，包括 AI 在哪裡出錯、是誰發現的、怎麼修正的。完整對話紀錄在 `ai-collab/transcripts/`。

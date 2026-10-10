@@ -31,7 +31,7 @@ description: 沿兩條軸審查使用者指定的檔案或 diff：Spec 軸（是
 依序找：
 1. 使用者作為參數給的路徑。
 2. 題目全文 `LionDEExam/01_考題卷_資料工程師TakeHome.md` 中對應 Part 的段落。
-3. 專案 `.claude/` 下與此任務相關的 spec、plan 文件，或 process-log 該任務步驟 1 的拆解結果。
+3. 專案 `.claude/` 下與此任務相關的 spec、plan 文件，或 `ai-collab/process-log.md` 中該任務的拆解、委派事件。
 4. 都找不到就問使用者。使用者說沒有 spec 時，略過 Spec subagent，並在報告中寫明「無 spec，未做 Spec 軸」。
 
 ### 3. 找 standards 來源
@@ -87,13 +87,14 @@ description: 沿兩條軸審查使用者指定的檔案或 diff：Spec 軸（是
 
 ### 6. 交給使用者記錄
 
-審查結果是 process-log 的素材，依 `CLAUDE.md` 紀錄規則據實記錄：
-- **步驟 3 驗證**：寫審查方法（雙軸審查、審查對象、spec 來源）與結果摘要。
-- **步驟 4 修正**：每個被採納的問題寫成一條 `<P>-NN.k`，**發現者寫「驗收 agent」**，不要寫成 AI 自查或使用者；附 subagent 引用的 `檔案:行號` 作為證據。
+審查結果是 process-log 的素材，依 `CLAUDE.md` 紀錄規則，在 `LionDEExam/submission/ai-collab/process-log.md` 記一個事件（格式照 `ai-collab/README.md`），據實記錄：
+- **經過**：審查方法（雙軸審查、審查對象、spec 來源）、結果摘要，以及被採納的問題：原本產出什麼、錯在哪。
+- **誰**：**發現者寫「驗收 agent」**，不要寫成 AI 自查或使用者。
+- **依據**：subagent 指出的位置改寫成函式名＋可搜尋的程式碼片段（不寫行號）、session id；修正後補 commit。
 - 哪些問題要修、哪些不採納，由使用者決定。AI 列出選項與代價，不自行定案。
 - 修完後要重新派 fresh-context subagent 驗收，不由修的人自己驗收。
 
-寫入 process-log 後，回覆最後一行寫「已記錄 <P>-NN 步驟 N」。
+寫入 process-log 後，回覆最後一行寫「已記錄事件：<標題>」。
 
 ## 為什麼分兩軸
 

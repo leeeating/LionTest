@@ -5,14 +5,14 @@
 - 檔名：`ADR-NN-<主題>.md`，編號跨 Part 共用、連續、不重用。
 - 背景、選項、後果由 AI 起草並附資料證據；**決定與理由由我本人撰寫**。
 - 狀態為「已定案」的 ADR 才代表最終決定。決策被推翻時開新 ADR 取代舊的，舊檔保留並改狀態為「被 ADR-NN 取代」。
-- 每份 ADR 連回 `../ai-collab/process-log-<part>.md` 中對應的任務 `<P>-NN`。
+- 每份 ADR 連回 `../ai-collab/process-log.md` 中對應的事件（事件標題）。
 
 ## 範本
 ```markdown
 # ADR-NN｜<決策標題>
 - 狀態：草稿／已定案／被 ADR-NN 取代
 - Part：
-- 關聯：<<P>-NN>
+- 關聯：<process-log.md 事件標題>
 
 ## 背景
 ## 選項
