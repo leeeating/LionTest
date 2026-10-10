@@ -72,7 +72,7 @@
   AI 把這些概念寫成給 AI 的規則 prompt，全文見 `prompts/doc-system.md`；3 份 memory（含 keep-it-simple）依使用者要求另外記錄，之後使用者要求升級成資料夾，照錄原始檔於 `ai-collab/memory/`。落點是專案 CLAUDE.md 的「紀錄規則」、`ai-collab/README.md` 的「事件格式」、三個專案 skill（`adr`、`review-two-axis`、`to-questionnaire` 的紀錄步驟改成記事件、不寫行號；由驗收 agent 發現它們仍用舊制度後修正），以及 AI 的 memory 檔 feedback-layered-docs、feedback-no-line-numbers（不在 repo 內）。
   依新制度，原本每個交付物照六步驟寫滿一節的 `process-log-part-b.md`（約 500 行）濃縮成本檔的事件；舊檔步驟 3 的查詢腳本與輸出搬到 `part_b/evidence.md`（作為報告證據，數字不改），舊檔刪除，全文保留在 commit `34a4cdd`。
 - 誰：使用者核可改動計畫；規則原文由 AI 撰寫；memory 在核可前已寫入；『不引用行號』進 CLAUDE.md 是 AI 依使用者先前的要求自行加入。
-- 依據：session 3b7e0f96；CLAUDE.md、ai-collab/README.md、`ai-collab/prompts/doc-system.md`、`ai-collab/memory/`、`.claude/skills/*/SKILL.md`〔待 commit〕；commit `34a4cdd`（舊檔全文）。
+- 依據：session 3b7e0f96；CLAUDE.md、ai-collab/README.md、`ai-collab/prompts/doc-system.md`、`ai-collab/memory/`、`.claude/skills/*/SKILL.md`：commit `400e7c8`；時間軸與 evidence.md：commit `a124320`；舊檔全文：commit `34a4cdd`。
 
 ## 2026-10-10｜Part B｜〔進行中〕Part B 報告待使用者定稿；#12 嚴重度暫不處理
 - 經過：審查報告經四輪 fresh-context 驗收，仍是 AI 初稿（標 `〔AI 初稿，待使用者逐條確認、改寫〕`），待使用者逐條確認並用自己的話定稿。#12 的嚴重度（目前 P2）暫不處理。`notes/dataset/` 也還沒獨立驗收、還沒經使用者定稿。〔待使用者確認〕
