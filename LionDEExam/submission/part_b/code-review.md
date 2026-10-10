@@ -157,12 +157,7 @@ missing_fx = converted.filter(F.col("amount_twd").isNull())  # 寫入隔離表�
 - **重跑**：同一個 batch 跑兩次，這批資料就寫進去兩份，不符合冪等性。
 - **訂單更新**：官方 README 定義同一 order_id 以 `updated_at` 區分新舊；若照此語意，增量檔裡和 base 同 order_id 的列是既有訂單的新版本（例如 paid → completed）。append 會讓新的那一列和原本那列並存；新列的 `order_date` 由它自己的 `order_created_at` 衍生，而這些列的 `order_created_at` 和 base 不同（見 (b)），所以不一定落在原本那一列的分區。
 
-**(b) 業務影響**：
-- 重跑一次，該批次的訂單金額翻倍（分散在多個 `order_date` 分區：day1 的 `order_created_at` 從 2026-05-01 到 07-01，橫跨 62 個 `order_date`）。
-- 實測 day1 增量有 597 個 order_id（603 列）已經存在於 `orders_base`。若照官方語意，在 append 的寫法下：
-  - **金額**：這 603 列**全部**會和 base 的原列並存，金額重複計算。day2、day3 各約 600 筆同樣情況，另外還有跨增量檔的重複（day2 有 25 筆在 day1 出現過）。
-  - **狀態**：其中 485 列的狀態和 base 不同（例如同一張單同時有 paid 和 completed 兩列），這只額外影響狀態統計。
-- **與官方語意不符的現象，需向上游確認**：這 603 列的 `order_created_at`、`member_id`、`amount` 沒有一列跟 base 相同（逐欄比對，三欄各自相同的列數都是 0）。例如 `ORD00005192` 在 base 是 2026-05-06、M007765、10230.87，在 day1 是 2026-05-04、M005173、6927。同一張訂單的更新不應該改變下單時間與會員，所以這些列也可能是另一張訂單使用了相同的 order_id。#5 的 3 組也有同樣的現象。order_id 是否可作為唯一鍵，留待 Part A 以 ADR 定案。不論哪種解讀，重跑造成的重複都成立。
+**(b) 業務影響**：重跑一次，該批次的訂單金額就翻倍。day1 增量有 603 列的 order_id 已存在於 `orders_base`（day2、day3 各約 600 筆），若照官方語意它們是既有訂單的新版本，append 會讓新舊兩列並存，金額重複計算。但這 603 列的 `order_created_at`、`member_id`、`amount` 沒有一列跟 base 相同，也可能是另一張訂單用了相同的 order_id，**需向上游確認**；order_id 是否可作為唯一鍵留待 Part A 以 ADR 定案，不論哪種解讀，重跑造成的重複都成立。逐欄比對與各項筆數見 `evidence.md` E1、E2、E3、E11。
 
 **(c) 修正**（以官方語意為前提）：以 `order_id` 為 key 做 Delta `MERGE`：`whenMatchedUpdateAll`（只在來源的 `updated_at` 比較新時更新）＋`whenNotMatchedInsertAll`。另一個做法是對受影響的 `order_date` 分區用 `replaceWhere` 整區重算，但訂單會跨分區更新，MERGE 比較單純。
 
@@ -180,7 +175,7 @@ tgt = DeltaTable.forPath(spark, f"{LAKEHOUSE}/fact/fact_order")
 
 **(a) 問題**：`main()` 中的 `dim_member = update_dim_member(members)` 把回傳值存起來之後就沒用到；`fact = build_fact(converted, members, products)` 傳進去的是原始的 `members.csv`，`build_fact` 再用 `converted.join(members, "member_id", "left")` 關聯。這份檔裡同一個會員有多個 `extract_date` 快照，join 後就變成一對多。
 
-**(b) 業務影響**：實測 `members.csv` 有 8,991 列，但只有 8,000 個會員，其中 989 人有 2 到 3 筆快照。以 day1 原始增量的全部 4,615 列計算（尚未去重、TWD 也未被丟），有 570 列屬於這些會員，join 後多出 571 列，金額跟著重複計算。這個數字的前提是 join 前的列數不受其他問題影響：若 #1、#5 已修好（TWD 保留、每個 order_id 留一列，共 4,597 列），多出 569 列；照現在管線的順序，`dropDuplicates` 之後又被匯率 inner join 丟掉 TWD，只剩 1,536～1,538 列進入這個 join，多出 182～183 列（範圍來自 `dropDuplicates` 留下哪一列不確定）。一對多 join 會讓同一張訂單的每個快照各產生一列，同時帶著不同快照的 `member_level`（等級變過的會員，新舊等級各一列），而不是訂單成立當時的等級。
+**(b) 業務影響**：`members.csv` 裡有 989 位會員有 2～3 筆快照。day1 原始增量（未去重、未丟 TWD）有 570 列屬於這些會員，join 後多出 571 列，營收被重複計算；等級變過的會員，同一張訂單還會同時帶著新舊兩個等級，而不是下單當時的等級。精確筆數依 #1、#5 是否已修而不同（182～571 列），見 `evidence.md` E1、E2。
 
 **(c) 修正**：改 join 修好之後的 dim_member，條件用半開區間 `valid_from <= order_date < valid_to`（point-in-time join；#6 的寫法讓舊版的 `valid_to` 和新版的 `valid_from` 是同一天，半開區間才不會讓這一天的訂單同時對到新舊兩版）。前提是 dim 已照 #6 (c)「初始載入」回填歷史版本，否則早於會員第一版 `valid_from` 的訂單會對不到任何版本（照初始載入回填，就不會對不到，但不含被 #6 隔離的 28 位同分會員：day1 有 17 張對不到，要靠 #6 的隔離告警處理）。更好的做法是 fact 只存 `member_sk`，等級從維度表查。
 
@@ -188,7 +183,7 @@ tgt = DeltaTable.forPath(spark, f"{LAKEHOUSE}/fact/fact_order")
 
 **(a) 問題**：`clean_orders` 先 `dropDuplicates(["order_id"])`，每個 order_id 已經只剩一列，而且是任意一列；後面的 `F.row_number().over(w)` 永遠只對到一列，等於沒作用。window 的排序鍵也選錯了：`orderBy(F.col("order_created_at").desc())` 依下單時間排序。官方 README 定義同一 order_id 以 `updated_at` 區分新舊；若照此語意，同一張訂單的多次更新 `order_created_at` 相同、`updated_at` 不同，應該按 `updated_at` 排序。
 
-**(b) 業務影響**：實測 day1 有 18 個 order_id 重複，18 組的 `updated_at` 都不同。保留哪一筆是不確定的，同樣的輸入重跑可能得到不同結果。其中 15 組除了 `updated_at` 之外每個欄位都相同，狀態也相同，符合官方語意。例如 `ORD00005192` 兩列都是 completed，`updated_at` 只差 26 秒（22:37:32 與 22:37:58），`dropDuplicates` 留下哪一列不確定，而事實表的 `updated_at` 又是 #3 MERGE 判斷新舊的依據。另外 3 組（`ORD00036457`、`ORD00047034`、`ORD00076774`）連 `order_created_at`、`member_id`、`amount` 都不同，這是**與官方語意不符的現象，需向上游確認**；同樣的現象也出現在 #3 的全部 603 列（增量列和 base 的這三欄全都不同）。例如 `ORD00036457` 一列是 M002150 的 completed 訂單（TWD 200,659），另一列是 M000272 的 cancelled 訂單（USD 18,042.46）。若照官方語意，取 `updated_at` 最新的一列即可；若實際是兩張不同的訂單，任何去重都會讓其中一張消失。order_id 是否可作為唯一鍵，留待 Part A 以 ADR 定案。
+**(b) 業務影響**：day1 有 18 個 order_id 重複，保留哪一筆不確定，同樣的輸入重跑可能得到不同結果，而事實表的 `updated_at` 又是 #3 MERGE 判斷新舊的依據。其中 15 組只差 `updated_at`，符合官方語意，取最新一列即可；另外 3 組連 `order_created_at`、`member_id`、`amount` 都不同，**需向上游確認**，若實際是兩張不同的訂單，任何去重都會讓其中一張消失。order_id 是否可作為唯一鍵，留待 Part A 以 ADR 定案；各組明細見 `evidence.md` E1、E2。
 
 **(c) 修正**：拿掉 `dropDuplicates`，只用 window，按 `updated_at` 由新到舊排序（官方語意）。在上游確認前，主要欄位不一致的重複列先送隔離表。
 
@@ -205,7 +200,7 @@ latest = orders_inc.withColumn("rn", F.row_number().over(w)).filter("rn = 1").dr
 
 **(a) 問題**：`update_dim_member` 中的 `updated.write.format("delta").mode("overwrite")` 搭配 `"replaceWhere", "member_id IS NOT NULL"`，條件涵蓋所有列，等於整張表 overwrite。寫進去的只有 `updated`，也就是「有變更的會員」。
 
-**(b) 業務影響**：每次執行都會把整張 dim_member 換成「當天有變更的會員」。假設 dim 初始已有全部會員（8,000 人），第一次執行後只剩這次有變更的會員，其餘會員連同歷史版本全部消失。同一份 members 第二次跑時，dim 裡的屬性大多已經和最新快照相同，`changed` 幾乎為空，dim 會被幾乎清空；沒有任何會員變更的那天也一樣。說「幾乎」是因為有 28 位會員在最新的 `extract_date` 有兩筆快照（同分，見 #6 (b)），`row_number` 每次跑都可能挑到不同的那一列，這些會員可能再次被判定為「有變更」而留下來。需要的歷史版本是被刪掉，不是被保留。Delta 雖然可以 time travel 救回，但前提是要有人發現，而且要在保留期內、還沒被 VACUUM 清掉舊檔之前（見 5.3）。
+**(b) 業務影響**：每次執行都會把整張 dim_member 換成「當天有變更的會員」，其餘會員連同歷史版本全部消失；同一份 members 重跑或沒有任何變更的那天，dim 會被幾乎清空（只剩 28 位同分會員可能每次被判定為「有變更」而留下，見 #6 (b)、`evidence.md` E2、E5）。Delta 雖然可以 time travel 救回，但前提是要有人發現，而且要在保留期內、還沒被 VACUUM 清掉舊檔之前（見 5.3）。
 
 **(c) 修正**：改用 Delta `MERGE`，見 #6 的完整寫法。
 
@@ -218,7 +213,7 @@ latest = orders_inc.withColumn("rn", F.row_number().over(w)).filter("rn = 1").dr
 - **dim 有多版本時會重複比對**：沒有限定只跟 dim 的「目前版本」比較，會跟每一個歷史版本各比一次。
 - **同一天的快照同分時任意挑一列**：`update_dim_member` 的 `Window.partitionBy("member_id").orderBy(F.col("extract_date").desc())` 只依 `extract_date` 排序，同一個會員在同一個 `extract_date` 有兩列時，留下哪一列是任意的。
 
-**(b) 業務影響**：會員升等的歷史查不到，「升等前後的消費變化」這類分析做不出來；新註冊會員在維度表裡找不到。實測 989 位多快照會員中，434 人的 `member_level` 有變過、376 人的 `city` 有變過。另外 `members` 的 (member_id, extract_date) 有 30 組重複（每組 2 列），其中 28 組落在該會員最新的 `extract_date`，這 28 組兩列的 `member_level` 都不同（city 相同），例如 M000096 在 2026-04-30 同時有金卡和銀卡。這 28 位會員的目前等級取決於 `row_number` 任意挑到哪一列，同樣的輸入重跑可能寫進不同的等級。
+**(b) 業務影響**：會員升等的歷史查不到，「升等前後的消費變化」這類分析做不出來；新註冊會員在維度表裡找不到。實測 989 位多快照會員中有 434 人的 `member_level` 變過。另有 28 位會員在最新的 `extract_date` 有兩筆等級不同的快照，目前等級取決於 `row_number` 任意挑到哪一列，重跑可能寫進不同的等級，所以 (c) 先把它們送隔離表；明細見 `evidence.md` E1。
 
 **(c) 修正**：標準的 Delta MERGE 兩段式寫法：先把有變更的目前版本關閉（設定 `valid_to`、`is_current=false`），再插入新版本與新會員。比較時用 null-safe 的 `<=>`（`eqNullSafe`）。取最新快照前先處理同分：同一會員在最新 `extract_date` 有多列時送隔離表並告警，本批不更新該會員；另一個做法是加上次排序鍵讓結果固定，但 `members` 沒有能判斷同日先後的欄位，次排序鍵只能讓結果可重現，不能保證選對，需要跟上游確認。
 
@@ -293,10 +288,11 @@ chg = (latest_snap.alias("s").join(cur.alias("d"), "member_id", "left")
 
 **(a) 問題**：`load_sources` 的 4 次讀檔都是 `spark.read.option("header", True).csv(`，沒給 schema，也沒設 `inferSchema`，所以所有欄位都是字串。金額比較和相減全靠隱式轉型，`order_date` 也是字串。
 
-**(b) 業務影響**：以 `clean_orders` 的 `filter(F.col("amount") > 0)` 為例，`amount` 是字串、`0` 是整數，Spark 會把字串轉成整數再比較，結果取決於 `spark.sql.ansi.enabled`（本機 pyspark 4.2 小資料實跑 `explain()`）：
-- **ANSI 關閉**（Spark 3.x 的預設，Fabric 的 Spark 3.x runtime 屬於這類）：實際條件是 `cast(amount as int) > 0`。`0.5` 被截成 0 而被濾掉；格式不對的值（例如千分位 `1,200`）轉成 null，也被靜默濾掉，不會報錯。
-- **ANSI 開啟**（Spark 4 的預設，本機 4.2 確認預設為 true）：實際條件是 `cast(amount as bigint) > 0`，帶小數點的字串無法轉成 bigint，報 `CAST_INVALID_INPUT` 錯誤，管線直接掛掉。不只 `0.5`，`100.0` 這種整數值也一樣；三個增量檔的金額全部帶小數點（例如 `13100.0`；不含小數點的列數 day1、day2、day3 都是 0），用 day1 實際檔案跑同一個 filter 就會報錯。
-- 目前資料的影響：三個增量檔的金額最小值是 83.24（day3），沒有 0 到 1 之間或格式不對的值，所以在 ANSI 關閉時不影響現在的數字（day1 4,615 列 filter 後仍是 4,615 列）；ANSI 開啟時則是整條管線失敗。
+**(b) 業務影響**：所有欄位都是字串，`clean_orders` 的 `filter(F.col("amount") > 0)` 結果取決於 `spark.sql.ansi.enabled`：
+- **ANSI 關閉**（Spark 3.x 的預設，Fabric 的 Spark 3.x runtime 屬於這類）：`0.5` 這類 0 到 1 之間的金額、格式不對的值（例如千分位 `1,200`）被靜默濾掉，不會報錯；目前資料沒有這種值，不影響現在的數字。
+- **ANSI 開啟**（Spark 4 的預設）：帶小數點的字串無法轉成 bigint，報 `CAST_INVALID_INPUT`；三個增量檔的金額全部帶小數點（例如 `13100.0`），整條管線直接失敗。
+
+實測見 `evidence.md` E3、E5、E6、E11。
 
 **(c) 修正**：明確定義 `StructType` schema，並設定 `mode("FAILFAST")`，或者把壞掉的列導到隔離區。
 

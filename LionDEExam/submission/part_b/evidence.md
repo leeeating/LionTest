@@ -20,6 +20,7 @@
 | #12 CSV 不指定 schema、隱式轉型 | E3 `[#12]`；E5 `[3]`；E6 |
 | 4.6 靜態分析（ruff） | E8 |
 | `notes/dataset/` 資料字典、增量檔觀察 | E9 |
+| #3（各增量檔與 base 重疊）、#12（金額例子） | E11 |
 | 5.3 若已部署到 prod：資料怎麼復原 | E10（報告引用 [2]、[3]；其餘情境為修正後 MERGE 的行為驗證） |
 
 ## E1｜主要數字重算（#1、#3～#7）
@@ -789,3 +790,33 @@ spark.stop()
 ```
 
 - `[6]` 結論：修正批次的 `updated_at` 與錯誤批次相同（T2）時，`s.updated_at > t.updated_at` 不成立，MERGE 仍提交了 v2，但 `numTargetRowsUpdated=0`，**O1 最後仍是錯誤的 `cancelled`**。對照組修正批次用 T3 時，`numTargetRowsUpdated=1`，O1 被覆蓋成 `paid`。
+
+## E11｜各增量檔與 orders_base 重疊的 order_id（#3）
+
+補上 #3 (b)「day2、day3 各約 600 筆」的依據，以及 #12 (b) 的金額例子 `13100.0`（見本節末）。執行：`python3 -I q.py LionDEExam/candidate_package/dataset`（在 `LionTest/`）。
+
+```python
+import csv, sys
+d=sys.argv[1]
+ids=lambda f:[r["order_id"] for r in csv.DictReader(open(f"{d}/{f}",encoding="utf-8-sig"))]
+base=set(ids("orders_base.csv"))
+for day in ("day1","day2","day3"):
+    rows=ids(f"orders_incremental_{day}.csv")
+    print(day, "rows_in_base=", sum(i in base for i in rows), "distinct=", len({i for i in rows if i in base}))
+```
+
+輸出：
+
+```
+day1 rows_in_base= 603 distinct= 597
+day2 rows_in_base= 602 distinct= 599
+day3 rows_in_base= 603 distinct= 598
+```
+
+`13100.0` 的出處（在 `LionTest/` 執行，截前 80 字元）：
+
+```
+$ grep -n "13100.0" LionDEExam/candidate_package/dataset/orders_incremental_day1.csv | head -1 | cut -c1-80
+2:ORD00102010,M002283,P00096,app,created,2,TWD,13100.0,500.0,2026-07-01T05:51:32
+```
+
