@@ -74,7 +74,7 @@ ASOF + CASE WHEN order_date < valid_to THEN level END -> O1 2026-05-15 NULL
 ## 本專案出處
 - `part_b/code-review.md` #4：`build_fact` 中的 `converted.join(members, "member_id", "left")`，改 join `dim_member` 並用半開區間。
 - `part_b/code-review.md` #6 (c)「初始載入」：回填歷史與第一版 `valid_from`。
-- `notes/part_b/scd2.md`：王小明例子與「第一版的 `valid_from` 定在哪」。
+- [scd.md](scd.md)：王小明例子與「第一版的 `valid_from` 定在哪」。
 
 ## 官方文件
 - DuckDB ASOF JOIN（已讀）：https://duckdb.org/docs/current/guides/sql_features/asof_join.html 。內容：每個左列配對最近的較早右列；`INNER ASOF` 丟掉無匹配列，`LEFT ASOF` 補 NULL；範例只用 `>=`。

@@ -9,7 +9,33 @@ SCD（**緩慢變化維度**）是「維度表裡的屬性改了，要怎麼處�
 - **Type 2**：`versions.append(...)`（list append），銀卡、金卡各一列、各有有效期間，5/15 答銀卡。
 - **Type 3**：多一欄 `previous_level`，只記「上一個」值，再早的就沒了。
 
-Type 2 的細節（三件事、初始載入的坑）見 [SCD2 說明](../notes/part_b/scd2.md)；Type 2 怎麼 join 事實見 [point-in-time-join.md](point-in-time-join.md)。
+Type 2 怎麼 join 事實見 [point-in-time-join.md](point-in-time-join.md)；本題程式的 SCD2 錯在哪見 [這份程式的 SCD2 錯在哪](../notes/part_b/scd2.md)。
+
+## Type 2 細節（沿用王小明的例子）
+兩版都留，各自標有效期間：
+
+| member_id | 等級 | valid_from | valid_to | is_current |
+|---|---|---|---|---|
+| M001 | 銀卡 | 2026-04-30 | 2026-05-31 | false |
+| M001 | 金卡 | 2026-05-31 | 9999-12-31 | true |
+
+查 5/15 的訂單，找「5/15 落在哪一列的區間內」得到銀卡；5/31 的訂單落在金卡那列。區間是**半開**的（`valid_from <= order_date < valid_to`），所以舊版 `valid_to` 與新版 `valid_from` 同一天，那天的訂單也只會對到一版。
+
+**每次更新做三件事**：
+1. **關舊版**：目前版本的 `valid_to` 填上日期，`is_current` 改 false。
+2. **加新版**：插入新列，`valid_to` 寫 9999-12-31（代表「到現在都有效」）。
+3. **沒變就不動**：屬性沒變的會員不要多產生版本。
+
+**陷阱：初始載入只拿最新快照，歷史就沒了。** 「只取每人最新一筆」只適合 dim 已有歷史後的每日增量。dim 從空表開始時，若直接拿最新快照跑，每人只建出最新那一版，舊版永遠進不來，退化成 Type 1；再搭配半開區間 join，早於那唯一一版 `valid_from` 的事實會對不到任何版本（屬性變 null）。類比：list 初始化時只 append 了最後一筆。
+
+**初始載入的做法**（二選一，之後再接每日增量）：
+- 依快照日由舊到新逐批跑同一段 MERGE（04-30 → 05-31 → 06-30）：最單純，屬性沒變的批次自然不會多一版。
+- 一次性從全部快照算出每版的 `valid_from`、`valid_to`：要自己合併「相鄰兩筆屬性相同」的快照，也要先處理同日同分。
+
+**第一版的 `valid_from` 定在哪**（業務定義，要跟業務確認）：
+- 第一筆快照的日期：只記實際看到的；早於它的事實會對不到。
+- `register_date`：從註冊起就有一版；但註冊時的屬性是推定，不是觀測到的。
+- 很早的固定日期（如 1900-01-01）：一定對得到；同樣是推定，而且看不出哪段是推定。
 
 ## 名詞表
 | 名詞 | 說明 |
@@ -39,11 +65,11 @@ Type 2 的細節（三件事、初始載入的坑）見 [SCD2 說明](../notes/p
 | 6 | 完整＋目前值 | 同 Type 2，更新時要改整組舊列 | 兩種都簡單，但寫入較複雜 |
 
 ## 本專案出處
-- `members.csv` 是多次快照（`extract_date` 不同），989 人有多筆，是做 Type 2 的原料。
-- `buggy_pipeline` 的 `update_dim_member` 自稱 SCD2，實際沒有 `valid_to`／`is_current`，且寫入用 `"replaceWhere", "member_id IS NOT NULL"`，整張表覆寫，連 Type 1 都不如。分析見 [scd2.md](../notes/part_b/scd2.md)。
+`members.csv` 是多次快照（`extract_date` 不同），是做 Type 2 的原料；`buggy_pipeline` 的 `update_dim_member` 自稱 SCD2 卻做錯，見 [這份程式的 SCD2 錯在哪](../notes/part_b/scd2.md)。
 
 ## 官方文件
 - 已讀（Kimball Group, Dimensional Modeling Techniques）：[Type 0](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-0/)、[Type 1](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-1/)、[Type 2](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-2/)、[Type 3](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-3/)、[Type 4](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-4/)、[Type 6](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-6/)。
 - Kimball 定義對照：Type 0 值永不變；Type 1 覆蓋；Type 2 新增列、配新 surrogate key，加 effective／expiration／current indicator 三欄；Type 3 加新欄位存舊值；Type 4 拆成 mini-dimension；Type 6 是 Type 2 內嵌 Type 1 目前值；Type 5、7 的定義見開頭連結（已讀）。
 - 未證實：Type 4 的「mini 每列是一種屬性組合、新組合才長、無事實的變更不被記錄」，Kimball type-4 頁沒寫（頁面只說明拆出變動快的屬性、mini 有自己的主鍵、兩個 key 都放進事實表），此為依 mini-dimension 設計的業界理解。
+- 未證實：Type 2 初始載入的兩種做法（依快照日逐批 MERGE、一次性回填）與第一版 `valid_from` 的選項，是通用實務，未對照官方文件。
 - 未證實：各 Type 的「什麼時候用」是依各定義推得的使用情境，非 Kimball 原文；natural key、snapshot、`is_current` 的命名與 `9999-12-31` 填法、半開區間，這次沒讀到 Kimball 對應的定義頁（SCD 總覽頁回 404），為通用業界慣例。
