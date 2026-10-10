@@ -1,53 +1,84 @@
 # Process Log
 
-全專案的事件時間軸，依時間由舊到新。紀錄分三層：git commit 記檔案改了什麼，本檔記整個專案中**有意義的事件**（資料發現、方向決策、AI 出錯被抓到、範圍取捨、使用者定案），報告是最終結果文件。技術細節與數字見各事件「依據」的 commit 與 `../part_b/evidence.md`；Part B 改成本格式之前的逐步紀錄全文保存在 commit `34a4cdd` 的 `ai-collab/process-log-part-b.md`。格式見 `README.md`「process-log.md 事件格式」。
+這份紀錄記**使用者的思考過程**：當時質疑什麼、為什麼這樣決定、方向怎麼轉變。時間軸不求嚴謹，AI 做了哪些改動交給 git commit，完整對話在 `transcripts/`，最終結果在各 Part 報告。本檔依工作內容分成幾個部分，每部分內大致依時間排列，不同部分在時間上可能交錯。Part B 改成事件格式之前的逐步紀錄全文保存在 commit `34a4cdd` 的 `ai-collab/process-log-part-b.md`；格式見 `README.md`「process-log.md 事件格式」。
 
-## 2026-10-09｜Part B｜使用者選擇先讓 AI 產審查報告初稿，再審閱質疑
-- 經過：AI 原本請使用者自己先讀 `buggy_pipeline.py`；使用者回覆「你應該先產出一份報告我在檢查」，改由 AI 先讀程式碼、量化影響、寫初稿，預定由使用者逐條審閱並質疑。這正是使用者定義的「你先看」（使用者 2026-10-10 事後澄清：「我先看不代表是我要從0到1 而是先看ai的初稿在從中質疑ai」）。
-- 誰：使用者決定。
-- 依據：session 3b7e0f96；commit `34a4cdd`（舊紀錄 B-01 步驟 0～2）。
+## 第一部分：建立文件系統
 
-## 2026-10-09｜Part B｜用 dataset 量化 buggy_pipeline.py 的問題影響
-- 經過：題目不允許執行原管線，AI 改用 Python 直接讀 `candidate_package/dataset/` 量化每個問題。最關鍵的發現是 fx_rates 沒有 TWD，day1 有三分之二的訂單對不到匯率，以及會員多快照讓 join 一對多膨脹；這些數字讓審查報告的嚴重度有資料依據。
-- 誰：AI 查詢，執行結果。
-- 依據：session 3b7e0f96；commit `ad16fe7`（`part_b/code-review.md`）；`part_b/evidence.md` E1。
+建立這個系統的動機，用使用者的話說：「我們目前花了一些時間建立建系統來框住整了ai的產出」。目的是讓每份產出都能追溯、使用者比 AI 更懂每個結論，附帶把學到的內化成 DE 能力。文件依用途分四種：
 
-## 2026-10-10｜Part B｜建立 dataset 資料字典；AI 三處錯誤被抓到
-- 經過：使用者請 AI 先為 dataset 寫文件，並從 AI 提的選項中選定範圍：只寫資料字典＋Part B 已驗證的事實，完整品質檢核留給 Part A；跟決策有關的發現是 order_id 在 base 就有重複、members 的 (member_id, extract_date) 有重複。使用者審閱初稿時問「增量檔是不是訂單的 log」，要求把觀察另記一份檔案。AI 錯誤一：統計 `amount` 時把字串拿來比大小，得到沒有意義的最小、最大值。AI 錯誤二：審查報告把 `amount_twd - coupon_discount` 誤判為可能幣別不一致，但官方 README 已寫明 `coupon_discount` 是 TWD，AI 寫初稿前沒讀 README。AI 錯誤三：把增量檔 `updated_at` 範圍寫成「批次日起 3 天內」，重查後發現有晚 4 天的、也有早於批次日的。
-- 誰：使用者從 AI 提的選項中選定範圍，並提出增量檔問題；三處錯誤皆由 AI 自查發現（寫字典讀 README、依使用者要求重新查詢時）。
-- 依據：session 3b7e0f96；commit `b7fe219`（`notes/dataset/`）、`ad16fe7`；`part_b/evidence.md` E9；`candidate_package/README.md`「欄位說明」。
+| 用途 | 給誰 | 文件 |
+|---|---|---|
+| 結果 | 閱卷者 | 各 Part 報告（論文式）、一頁 AI 協作報告 |
+| 理解 | 使用者 | `notes/` 放這一題的資料與程式；`learning/` 放可帶走的 DE 觀念地圖與筆記。換專案用不到的放 notes，用得到的放 learning |
+| 紀錄 | 追溯 | process-log 記使用者的思考過程，git commit 記檔案改動並帶 `Session:`，transcripts 是完整對話，粒度由粗到細 |
+| 規則來源 | AI 與閱卷者 | CLAUDE.md、`prompts/`（規則、skills 副本）、`memory/` |
 
-## 2026-10-10｜Part B｜使用者要求：筆記分層多檔，繳交報告改成論文式
-- 經過：AI 原本把理解筆記塞在同一檔、審查報告是條列清單；使用者審閱後要求兩者分開：筆記分層多檔，繳交報告是給閱卷者的結構化文件（類似小論文），並選定大綱。同時要求關聯圖改 mermaid、報告先說明這支程式的用途。審閱時使用者也質疑「為什麼可以直接去重」並問「SCD2 是什麼」，AI 的解釋整理成 `notes/part_b/dedup.md`、`scd2.md`。
-- 誰：使用者審閱初稿時提出並決定文件結構。
-- 依據：session 3b7e0f96；commit `ad16fe7`（`part_b/code-review.md`、`notes/part_b/`）、`b7fe219`（`notes/README.md`、`notes/dataset/`）。
+運作方式是 AI 先出初稿 → 使用者審閱質疑 → 拆解委派 → fresh-context 驗收 → 修正 → 使用者定案。追溯路徑是報告 → 事件 → commit → 對話。文件不引用行號、結論附執行證據、AI 的錯誤照實記。
 
-## 2026-10-10｜Part B｜四輪 fresh-context 驗收抓到 AI 初稿的錯誤
-- 經過：第一輪抓到 7 個問題（4 個主要、3 個次要），最嚴重的是 AI 把「每次執行都把整張 dim 換成當天有變更的會員、第二次跑幾乎清空」低估成「表會越縮越小」。第二輪抓到 5 個問題，最嚴重的是 #3、#5 對 order_id 的判準互相矛盾，order_id 能否當唯一鍵因此留給 Part A 以 ADR 定案。第三輪抓到 4 個問題，最嚴重的是 SCD2 修法沒寫初始載入；AI 派工時預期「ANSI 模式只有少數值會報錯」，實跑 pyspark 4.2 推翻，ANSI 開啟（Spark 4 預設）時整條管線會失敗。第四輪抓到 2 處內部矛盾，最嚴重的是同分隔離規則與「0 張對不到」的說法衝突。
-- 誰：驗收 agent 發現；ANSI 的錯誤預期由執行結果推翻；AI 依查詢輸出修正。
-- 依據：session 3b7e0f96；commit `ad16fe7`（`part_b/code-review.md`、`notes/part_b/`）、`b7fe219`（`notes/dataset/`）、`4f8651c`（pyspark 4.2＋delta-spark）；`part_b/evidence.md` E1～E7。
+### 2026-10-10｜全專案｜筆記要分層，報告要像小論文
 
-## 2026-10-10｜Part B｜使用者要求：報告加入 linter、問題總表放最前
-- 經過：使用者要求報告加入靜態分析；ruff 只抓到 12 個問題中 1 個的跡象，說明這類邏輯錯誤靠 linter 抓不到。使用者另要求問題總表移到報告最前面。
-- 誰：使用者提出。
-- 依據：session 3b7e0f96；commit `ad16fe7`（`part_b/code-review.md` 4.6 節、問題總表）；`part_b/evidence.md` E8。
+審閱 Part B 初稿時，使用者發現 AI 把理解筆記全塞在同一個檔、報告寫成條列清單。他把兩種文件分開想。理解問題的筆記應該「先讓人針對一件事情迅速了解，再慢慢讓人了解目前遇到的問題，以及建議的解決方式。好的文件系統不會把所有內容放在同一個檔案中」；繳交的報告則是「完整的有結構的文件，類似小論文」。大綱由他從 AI 的提案中選定。
 
-## 2026-10-10｜全專案｜建立文件系統：筆記分層、報告論文式、三層紀錄、不引用行號
-- 經過：使用者在 Part B 過程中陸續提出文件系統的概念（筆記分層、報告論文式、紀錄分三層、文件不引用行號），起因之一是使用者重新排版 `buggy_pipeline.py` 後行號全部錯位，AI 改成函式名＋可搜尋片段，過程中也發現 AI 先前引用的幾處「程式碼片段」並非原文（例如把 `orders["currency"] == fx["currency"]` 寫成 `orders.currency == fx.currency`），一併改回原文。AI 把這些概念寫成規則，落到 CLAUDE.md、`ai-collab/README.md`、三個專案 skill 與 memory；skill 仍用舊制度是驗收 agent 發現的。舊的逐步紀錄依新制度濃縮成本檔，查詢證據搬到 `part_b/evidence.md`。
-- 誰：使用者提出概念並核可改動計畫；規則原文由 AI 撰寫；memory 在核可前已寫入；「不引用行號」進 CLAUDE.md 是 AI 依使用者先前的要求自行加入。
-- 依據：session 3b7e0f96；行號改寫：commit `ad16fe7`；規則、`ai-collab/prompts/doc-system.md`、`ai-collab/memory/`、skills：commit `400e7c8`；時間軸與 evidence.md：commit `a124320`；舊檔全文：commit `34a4cdd`。
+- 依據：commit `ad16fe7`、`b7fe219`
 
-## 2026-10-10｜Part B｜〔進行中〕Part B 報告待使用者定稿；#12 嚴重度暫不處理
-- 經過：審查報告經四輪驗收仍是 AI 初稿，待使用者逐條確認並用自己的話定稿；#12 的嚴重度（目前 P2）暫不處理。`notes/dataset/` 也還沒獨立驗收、還沒經使用者定稿。〔待使用者確認〕
-- 誰：使用者決定（#12 嚴重度暫不處理）。
-- 依據：session 3b7e0f96；`part_b/code-review.md`。
+### 2026-10-10｜全專案｜文件不該依賴行號
 
-## 2026-10-10｜全專案｜新增 teach skill：從專案萃取觀念內化成 SWE 能力
-- 經過：使用者想從這個專案中把觀念內化成自己的 SWE 能力，指定參考 Matt Pocock 的 teach skill。AI 查證原版設計，發現它是用來學新主題、教材來自外部資源，不是從專案萃取觀念；使用者決定學習內容放進 repo 的 `learning/`、課程改用 Markdown。AI 依此改寫成「先從專案萃取、再對照一手資源」，並拿掉 HTML、assets、reference、glossary、NOTES 等不必要的部分。
-- 誰：使用者提出需求，並決定位置與格式；AI 查證原版並改寫。
-- 依據：session 3b7e0f96；原版 https://github.com/mattpocock/skills/tree/49dd158/skills/productivity/teach（commit 49dd158）；`.claude/skills/teach/`、`learning/README.md`。
+使用者把 `buggy_pipeline.py` 重新排版（一行拆兩行）之後，報告裡的行號全部錯位，連驗收 agent 都以為是報告寫錯。他的結論是：「文件應該要對行號不依賴，使用其他方式來紀錄變動性很高的行號。」AI 之後改用「函式名＋可搜尋片段」，並自行把這條寫進 CLAUDE.md。
 
-## 2026-10-10｜全專案｜teach 改為 concept-note：討論中挑選可遷移觀念
-- 經過：使用者看過 teach（mission、課綱、學習紀錄、測驗的多 session 流程）後，描述自己要的方式：在討論中問 AI 哪些觀念值得記，AI 提供選項，使用者選擇後由 AI 寫一份簡單筆記，偏向套件用法、SQL 等可帶到其他專案的 SWE 技能。AI 依此刪除 teach，改寫成 `concept-note` skill，並改寫 `learning/README.md`。
-- 誰：使用者決定方式；AI 撰寫 skill。
-- 依據：session 3b7e0f96；teach 的 commit `8b09ff9`；`.claude/skills/concept-note/SKILL.md`、`learning/README.md`。
+- 依據：commit `ad16fe7`、`400e7c8`
+
+### 2026-10-10｜全專案｜紀錄分三層，process-log 改成時間軸
+
+原本的 process-log 照六步驟逐節記，越寫越長。使用者提出把紀錄拆成三層，各管各的：git commit 記檔案改了什麼、process-log 只記有意義的事件、報告是給閱卷者的結果。他核可了改動計畫，規則原文由 AI 撰寫，收進 `prompts/doc-system.md`；AI 在使用者核可前就先寫入了 memory。AI 改規則時漏了三個 skill 沒同步，它們原本還在用舊的 `<P>-NN`、六步驟紀錄，由驗收 agent 抓到。
+
+- 依據：commit `400e7c8`、`a124320`、`231e284`；`memory/feedback-keep-it-simple.md`
+
+### 2026-10-10｜全專案｜「你先看」是先看 AI 的初稿，不是自己從零做
+
+CLAUDE.md 原本把步驟 0 寫成「交給 AI 前，使用者先自己看資料」。使用者澄清自己的意思：「我先看不代表是我要從0到1 而是先看ai的初稿在從中質疑ai」。他的工作方式是讓 AI 先把初稿做出來，自己的價值放在審閱與質疑上；這其實在 Part B 一開始就是這樣做的（見第二部分第一個事件）。規則因此改成 AI 出初稿後主動列出值得質疑的地方，process-log 也同時精簡成只記發生什麼、為什麼重要。
+
+- 依據：commit `560d3d1`
+
+### 2026-10-10｜全專案｜想把觀念內化成自己的能力：teach 改成 concept-note
+
+使用者想藉這個專案把觀念內化成自己的 SWE 能力，先請 AI 參考 Matt Pocock 的 teach skill。看過 AI 改寫出來的 teach（mission、課綱、學習紀錄、測驗的多 session 流程）之後，他發現那不是自己要的，描述了更輕的方式：在討論中問 AI 哪些觀念值得記，AI 給選項，他選了之後寫一份簡短筆記，偏向套件用法、SQL 這類能帶到其他專案的技能。學習內容放進 repo 的 `learning/`、用 Markdown，也是他決定的。
+
+- 依據：commit `8b09ff9`、`33ba9d5`
+
+### 2026-10-10｜全專案｜筆記該放 notes 還是 learning：看換專案用不用得到
+
+寫了 4 份觀念筆記（SCD 名詞、取每組最新一筆、MERGE 冪等寫入、point-in-time join）之後，SCD 的內容同時出現在 `notes/` 和 `learning/`。歸位的規則是使用者同意的：換專案就用不到的（這一題的錯誤）放 notes，換專案還用得到的（通用概念）放 learning。
+
+- 依據：commit `4d91ce3`、`c4144d6`
+
+### 2026-10-10｜全專案｜learning 改成 bottom-up 的 DE 觀念地圖
+
+learning 從一份份筆記改成一張觀念地圖。AI 提了幾種做法，使用者選「題目＋業界通用」的範圍，並決定「先以 bottom up 為主」：只收本專案真的碰過的觀念，再借《Fundamentals of Data Engineering》的分類掛上去，而不是先畫一張完整地圖再回頭填。驗收時抓到 AI 把晚到資料的定義寫錯：原本寫成更新時間晚於或早於批次日都算晚到資料。
+
+- 依據：commit `c802584`；session 3b7e0f96
+
+### 2026-10-10｜全專案｜先把文件系統記下來，再進入 Part B
+
+使用者判斷文件系統已經建立得差不多，想先把這段過程記成 process-log 的第一部分，之後才正式進入 Part B，所以整份 process-log 重寫，兩部分都保留。改寫途中他在同一則訊息說「因此我們在工作時 要有意識提醒我更新文建」和「timeline可以不用那麼嚴謹 主要是紀錄我的思考過程」：CLAUDE.md 因此新增「AI 主動提醒更新文件」這條規則，紀錄的重心也從 AI 做了什麼，轉成他當時怎麼想。
+
+- 依據：session 3b7e0f96；〔待 commit〕
+
+## 第二部分：Part B 程式碼審查
+
+目前停在兩步：AI 產出審查報告初稿；使用者為 dataset 寫文件，用來理解並質疑報告。報告的修改細節（四輪驗收、linter、格式調整）記在 git，這裡不展開。
+
+### 2026-10-09｜Part B｜先讓 AI 產初稿，我再來檢查
+
+AI 原本請使用者自己先讀 `buggy_pipeline.py`。使用者回：「你應該先產出一份報告我在檢查」，選擇讓 AI 先讀程式碼、用資料量化影響、寫初稿，自己負責審閱並質疑。初稿之後經過四輪 fresh-context 驗收修正，每輪都抓到 AI 的錯（例如低估 dim 表會被清空、ANSI 影響被實跑推翻）。
+
+- 依據：commit `ad16fe7`、`34a4cdd`；`part_b/evidence.md`
+
+### 2026-10-10｜Part B｜為 dataset 寫文件，用來理解報告
+
+為了看懂報告，使用者請 AI 先為 dataset 寫文件，範圍從 AI 的選項中選定（只寫資料字典，品質檢核留給 Part A）。審閱時提出的理解問題（增量檔是不是 log、為什麼不能直接去重、SCD2 是什麼），答案整理在 `notes/` 和 `learning/`。過程中 AI 自查出錯：把字串型的 `amount` 拿來比大小、沒讀 README 就誤判 `coupon_discount` 的幣別。
+
+- 依據：commit `b7fe219`、`c4144d6`
+
+### 〔進行中〕Part B｜審閱報告初稿
+
+接下來由使用者逐條審閱報告並用自己的話定稿。#12 的嚴重度（目前 P2）他決定暫不處理。〔待使用者確認〕
