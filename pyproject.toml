@@ -1,0 +1,16 @@
+[project]
+name = "liontest"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "delta-spark>=4.4.1",
+    "duckdb>=1.5.6",
+    "pandas<3",
+    "pyspark>=4.2.0",
+    "pytest>=9.1.1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.0",
+]
