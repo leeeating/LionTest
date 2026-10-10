@@ -1,0 +1,12 @@
+.DS_Store
+# 原始題目壓縮檔，內容已解壓於 LionDEExam/
+LionDEExam.zip
+# 施工文件（spec、plan）與本機遮蔽清單不進版控；skills 進版控
+.claude/*
+!.claude/skills/
+# Python
+__pycache__/
+.venv/
+# 面試題目與素材不公開（公開 repo）
+LionDEExam/01_考題卷_資料工程師TakeHome.*
+LionDEExam/candidate_package/
