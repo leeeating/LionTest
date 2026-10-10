@@ -61,7 +61,7 @@ learning 從一份份筆記改成一張觀念地圖。AI 提了幾種做法，�
 
 使用者判斷文件系統已經建立得差不多，想先把這段過程記成 process-log 的第一部分，之後才正式進入 Part B，所以整份 process-log 重寫，兩部分都保留。改寫途中他在同一則訊息說「因此我們在工作時 要有意識提醒我更新文建」和「timeline可以不用那麼嚴謹 主要是紀錄我的思考過程」：CLAUDE.md 因此新增「AI 主動提醒更新文件」這條規則，紀錄的重心也從 AI 做了什麼，轉成他當時怎麼想。
 
-- 依據：session 3b7e0f96；〔待 commit〕
+- 依據：commit `1f35442`
 
 ## 第二部分：Part B 程式碼審查
 
@@ -78,6 +78,14 @@ AI 原本請使用者自己先讀 `buggy_pipeline.py`。使用者回：「你應
 為了看懂報告，使用者請 AI 先為 dataset 寫文件，範圍從 AI 的選項中選定（只寫資料字典，品質檢核留給 Part A）。審閱時提出的理解問題（增量檔是不是 log、為什麼不能直接去重、SCD2 是什麼），答案整理在 `notes/` 和 `learning/`。過程中 AI 自查出錯：把字串型的 `amount` 拿來比大小、沒讀 README 就誤判 `coupon_discount` 的幣別。
 
 - 依據：commit `b7fe219`、`c4144d6`
+
+### 2026-10-10｜Part B｜審閱前先補 DE 基礎：從「MERGE 能不能復原」問到 lakehouse 是什麼
+
+開始審閱時，使用者先要求問題總表「先簡述問題不列出片段」，接著借單向門／雙向門的概念，問修正後的 MERGE 是否能完整復原。AI 的回答用到 Delta 表、time travel、VACUUM，他發現自己缺背景，於是一路往下問：dim 和 fact 是不是新的資料集、Delta 表是什麼、為什麼資料是檔案，並要求「把我當作DE小白重新說明」、「我需要最基礎的理解」。答案整理成兩份 learning 筆記（data lake／warehouse／lakehouse、星型模型）。他用自己的話確認理解，例如「lakehose可以理解成lake + changelog是嗎」、「B就是把sql db的資料搬進warehose是嗎」；AI 回答時修正了細節（Delta 的 log 記的是檔案不是逐列變更；目的地是 lakehouse，來源是不是 SQL DB 只是推測），後一個問題的資料流圖由他要求補進報告 2.1 節。
+
+驗收 agent 這段抓到 AI 多處錯誤，例如：把 Snowflake、BigQuery 當成「儲存與運算綁在一起」的例子；流程圖說明寫「程式只讀 landing 的 CSV」，漏了它會讀回既有的 dim 表；星型筆記把 order_id 的官方語意寫成定論，而報告刻意留給 Part A 的 ADR；把星系寫成星型的替代選項；說 Delta 並行寫入衝突時會自動重試，實際上有衝突會丟例外。MERGE 可復原性的質疑帶出「#2 補上 VACUUM 前提」與「第 5 節補原始檔保留」兩個修改提案，尚待使用者決定。
+
+- 依據：commit `2afc5cb`、`83ccac2`、`4a14b0f`、`8dc5453`、`87f3788`
 
 ### 〔進行中〕Part B｜審閱報告初稿
 
