@@ -15,6 +15,7 @@ LionTest/                              git repo 根目錄
         ├── README.md                  交付索引
         ├── part_a/  part_b/  part_c/  module_x/
         ├── notes/                     理解問題時的筆記（分層、多檔）
+        ├── learning/                  從本專案萃取觀念的學習紀錄（/teach）
         ├── decisions/                 ADR，說明見其 README.md
         └── ai-collab/                 協作紀錄，說明見其 README.md
 ```
@@ -64,7 +65,7 @@ LionTest/                              git repo 根目錄
 - process-log 的定案事件只寫一行連到 ADR，理由不重複寫。
 
 ## Skills
-- 專案 skill 在 `.claude/skills/`：`adr`、`review-two-axis`（步驟 3 驗證）、`to-questionnaire`，皆改寫自 mattpocock/skills（MIT）。對齊訪談用全域 workflow.md 的「對齊」，不另設 skill。
+- 專案 skill 在 `.claude/skills/`：`adr`、`review-two-axis`（步驟 3 驗證）、`to-questionnaire`、`teach`（從專案萃取觀念供使用者學習），皆改寫自 mattpocock/skills（MIT）。對齊訪談用全域 workflow.md 的「對齊」，不另設 skill。
 - 專案中新建立的 skill 一律放 `.claude/skills/`、進 git，並在 process-log 記一個事件說明為什麼建。
 
 ## 歸屬標註

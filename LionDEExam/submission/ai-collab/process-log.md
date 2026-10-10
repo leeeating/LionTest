@@ -41,3 +41,8 @@
 - 經過：審查報告經四輪驗收仍是 AI 初稿，待使用者逐條確認並用自己的話定稿；#12 的嚴重度（目前 P2）暫不處理。`notes/dataset/` 也還沒獨立驗收、還沒經使用者定稿。〔待使用者確認〕
 - 誰：使用者決定（#12 嚴重度暫不處理）。
 - 依據：session 3b7e0f96；`part_b/code-review.md`。
+
+## 2026-10-10｜全專案｜新增 teach skill：從專案萃取觀念內化成 SWE 能力
+- 經過：使用者想從這個專案中把觀念內化成自己的 SWE 能力，指定參考 Matt Pocock 的 teach skill。AI 查證原版設計，發現它是用來學新主題、教材來自外部資源，不是從專案萃取觀念；使用者決定學習內容放進 repo 的 `learning/`、課程改用 Markdown。AI 依此改寫成「先從專案萃取、再對照一手資源」，並拿掉 HTML、assets、reference、glossary、NOTES 等不必要的部分。
+- 誰：使用者提出需求，並決定位置與格式；AI 查證原版並改寫。
+- 依據：session 3b7e0f96；原版 https://github.com/mattpocock/skills/tree/49dd158/skills/productivity/teach（commit 49dd158）；`.claude/skills/teach/`、`learning/README.md`。

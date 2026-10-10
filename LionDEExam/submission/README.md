@@ -9,4 +9,5 @@
 | 決策紀錄（ADR，跨 Part） | `decisions/` |
 | AI 協作紀錄（流程紀錄與完整對話） | `ai-collab/` |
 | 理解問題的筆記（Dataset、Part B） | `notes/` |
+| 學習紀錄（從本專案萃取觀念內化成 SWE 能力，用 `/teach`） | `learning/` |
 | AI 協作報告（一頁） | `ai-collab/ai-collab-report.md` |

@@ -55,6 +55,7 @@ LionTest/
         ├── README.md         繳交物索引
         ├── part_a/ part_b/ part_c/ module_x/
         ├── notes/            理解問題時的筆記（資料字典、概念說明）
+        ├── learning/         從本專案萃取觀念的學習紀錄（/teach）
         ├── decisions/        設計決策（ADR）
         └── ai-collab/        AI 協作紀錄（流程紀錄、完整對話、一頁報告）
 ```
