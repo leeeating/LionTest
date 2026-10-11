@@ -13,6 +13,7 @@
 | 2 | [appendix.md](appendix.md) | 審查方法、ruff 與 mypy 的輸出、SCD2 初始載入的做法 |
 | 3 | [prod-recovery.md](prod-recovery.md) | 若這支程式已合併並在 prod 跑過，資料怎麼復原 |
 | — | [evidence.md](evidence.md) | 報告主要數字與語意判斷的查詢腳本全文與輸出（E1～E13），可自行重跑 |
+| — | [future-improvements.md](future-improvements.md) | 〔之後改善〕主報告尚未涵蓋的問題（跨批次亂序、時區、小檔、隔離表寫出、Fabric 部署面），尚未驗證 |
 
 ## 證據怎麼來的
 
