@@ -54,13 +54,13 @@ dup source error: [DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE] Canno
 （第二行是來源有 `('A',300,5)`、`('A',400,6)` 兩列同 key 時的結果。）
 
 ## 常見的坑
-1. **用 append 寫事實表**：重跑同一批，該批金額翻倍；跨日的訂單更新會和舊列並存（本專案 #3）。
-2. **來源同 key 有多列**：Delta MERGE 直接報錯（見上面輸出）；**DuckDB 1.5.6 實測不報錯，留下哪一列不保證**：目標 `('A',1,1)`、來源 `('A',300,5)`、`('A',400,6)`，matched 時結果是 `[('A', 300, 5)]`（留下比較舊的那列）；matched 時把來源列順序反過來（400 在前），結果變成 `[('A', 400, 6)]`，即取來源的第一列，所以留下哪列取決於來源順序；not matched 且目標表沒有 PK 時，兩列都被 insert：`[('A', 300, 5), ('A', 400, 6)]`；not matched 且目標表有 PRIMARY KEY（如上面的 `mrg`）時報 `Constraint Error: PRIMARY KEY or UNIQUE constraint violation: duplicate key "A"`。三種結果不同，都不是你要的，所以來源一律先去重。先用 `row_number() over (partition by key order by updated_at desc)` 取最新一列再 MERGE（本專案 #4 join 放大、#5 去重不確定）。`dropDuplicates` 不保證留哪一列，不能當去重。
+1. **用 append 寫事實表**：重跑同一批，該批金額翻倍；跨日的訂單更新會和舊列並存（本專案 #9）。
+2. **來源同 key 有多列**：Delta MERGE 在這幾列對到目標既有列時報錯（見上面輸出）；目標還沒有這個 key 時不報錯，**多列全部被 insert**（Part B `evidence.md` E12 實測）；**DuckDB 1.5.6 實測不報錯，留下哪一列不保證**：目標 `('A',1,1)`、來源 `('A',300,5)`、`('A',400,6)`，matched 時結果是 `[('A', 300, 5)]`（留下比較舊的那列）；matched 時把來源列順序反過來（400 在前），結果變成 `[('A', 400, 6)]`，即取來源的第一列，所以留下哪列取決於來源順序；not matched 且目標表沒有 PK 時，兩列都被 insert：`[('A', 300, 5), ('A', 400, 6)]`；not matched 且目標表有 PRIMARY KEY（如上面的 `mrg`）時報 `Constraint Error: PRIMARY KEY or UNIQUE constraint violation: duplicate key "A"`。三種結果不同，都不是你要的，所以來源一律先去重。先用 `row_number() over (partition by key order by updated_at desc)` 取最新一列再 MERGE（本專案 #7 join 放大、#2 去重不確定）。`dropDuplicates` 不保證留哪一列，不能當去重。
 3. **沒判斷新舊**：晚到的舊資料會蓋掉新資料。`when matched and s.updated_at > t.updated_at` 才更新（上面「newer+stale」輸出）。
 4. **key 不可靠**：本專案 day1 增量與 base 的 603 列 `order_id` 相同但 `member_id`、`amount` 都不同，若它們其實是不同訂單，MERGE 會把兩張合成一張（是否為同一張，報告立場是「與官方語意不符，需向上游確認」），所以 key 要先確認。
 
 ## 本專案出處
-- `part_b/code-review.md`：`write_fact` 中的 `mode("append")`（#3）；`build_fact` 中的 `converted.join(members, "member_id", "left")`（#4）；`clean_orders` 中的 `dropDuplicates(["order_id"])`（#5）；修正建議「所有寫入改成以業務 key 做 MERGE」。
+- `part_b/code-review.md`：`write_fact` 中的 `mode("append")`（#9）；`build_fact` 中的 `converted.join(members, "member_id", "left")`（#7）；`clean_orders` 中的 `dropDuplicates(["order_id"])`（#2）；修正建議「所有寫入改成以業務 key 做 MERGE」。
 
 ## 官方文件
 - DuckDB MERGE INTO（已讀）：https://duckdb.org/docs/current/sql/statements/merge_into.html 。頁面未說明來源重複 key 的行為（以上方「常見的坑」第 2 點的 1.5.6 實測為準），也未說明哪版開始支援（未證實，本篇只確認 1.5.6 可用）。

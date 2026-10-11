@@ -88,8 +88,8 @@ print(con.sql("""
 M001 的 5 月訂單算在普卡、6 月訂單算在金卡：因為 fact 存的是代理鍵，歷史等級被保留下來。如果 fact 只存 `member_id` 再 join「目前」的會員資料，5 月那筆也會被算成金卡。
 
 ## 常見的坑
-- **fact join 到沒有唯一鍵的表，一列變多列**：Part B #4，`build_fact` join 的是原始 members 快照（同一會員多列），不是 `dim_member` 的單一版本，訂單和金額被放大。
-- **粒度沒講清楚**：若照官方語意（增量檔裡同一個 `order_id` 是同一張訂單的狀態更新），fact 要「一列一張訂單」，寫入前就得去重並以 `order_id` upsert，MERGE 是常見做法（Part B #3、#5）。但實測增量和 base 同 `order_id` 的列，連 `member_id`、`amount` 都不同，`order_id` 能不能當唯一鍵是 Part A 待定的 ADR。
+- **fact join 到沒有唯一鍵的表，一列變多列**：Part B #7，`build_fact` join 的是原始 members 快照（同一會員多列），不是 `dim_member` 的單一版本，訂單和金額被放大。
+- **粒度沒講清楚**：若照官方語意（增量檔裡同一個 `order_id` 是同一張訂單的狀態更新），fact 要「一列一張訂單」，寫入前就得去重並以 `order_id` upsert，MERGE 是常見做法（Part B #2、#9）。但實測增量和 base 同 `order_id` 的列，連 `member_id`、`amount` 都不同，`order_id` 能不能當唯一鍵是 Part A 待定的 ADR。
 - **金額沒統一幣別就加總**：資料裡同時有 TWD、USD、JPY，`orders_base` 另有 `NTD`（200 筆，要怎麼對應是 A-3 要檢核的事，見 `notes/dataset/dictionary.md`）；換算邏輯見 Part B 的 `convert_currency`。
 
 ## 本專案出處

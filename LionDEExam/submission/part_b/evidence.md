@@ -1,31 +1,50 @@
 # Part B 證據：查詢腳本與輸出
 
-本檔收錄 `code-review.md`（Part B 審查報告）與 `notes/` 引用的筆數、Spark 語意驗證的**查詢腳本全文與輸出原文**，閱卷者可自行重跑核對。內容從舊版協作紀錄（commit `34a4cdd` 的 `ai-collab/process-log-part-b.md` 步驟 3）原樣搬來，數字未改動；各輪驗收如何用到這些輸出，見 `../ai-collab/process-log.md`。
+本檔收錄 `code-review.md`（Part B 審查報告）、`appendix.md`、`prod-recovery.md`與 `notes/` 引用的筆數、Spark 語意驗證的**查詢腳本全文與輸出原文**，閱卷者可自行重跑核對。內容從舊版協作紀錄（commit `34a4cdd` 的 `ai-collab/process-log-part-b.md` 步驟 3）原樣搬來，數字未改動；各輪驗收如何用到這些輸出，見 `../ai-collab/process-log.md`。
 
 **執行方式**：題目要求不執行原管線（`buggy_pipeline.py`），以下只讀 `candidate_package/dataset/` 的 CSV，或用自建小資料驗證 Spark 語意。
 - 純資料查詢：Python 標準庫 `csv`，以 `encoding="utf-8-sig"` 讀（dataset 是 UTF-8 BOM）。把腳本存到 dataset **以外**的目錄，用 `python3 -I <腳本> <dataset 目錄>` 執行（`-I` 是隔離模式，不從腳本目錄或目前目錄載入模組）。在 `LionDEExam/` 下 dataset 目錄是 `candidate_package/dataset`，在 `LionTest/` 下是 `LionDEExam/candidate_package/dataset`。
 - pyspark 語意驗證：在 `LionTest/` 用專案 `.venv`（pyspark 4.2＋delta-spark）執行 `uv run python <腳本> ... 2>/dev/null`（Spark log 走 stderr，故丟掉）。
 
+## 舊編號與新編號對照
+
+報告的問題編號曾經改過：原本依嚴重度排序（#1～#12），現在依程式執行順序排序（#1～#11），SCD2 的兩個問題（舊 #2、#6）合併成新 #6。**本檔的腳本與輸出原文保留當時的舊編號**（例如輸出裡的 `[#7]`、`#5 組`），說明文字與下方索引用新編號。
+
+| 舊編號 | 新編號 | 問題 |
+|---|---|---|
+| #1 | #4 | 匯率 inner join 丟掉 TWD |
+| #2 | #6 | SCD2 寫入清表（與舊 #6 合併） |
+| #3 | #9 | append 重複、跨日更新 |
+| #4 | #7 | 一對多 join 放大 |
+| #5 | #2 | 去重保留任意一筆 |
+| #6 | #6 | SCD2 邏輯不完整（與舊 #2 合併） |
+| #7 | #3 | 非正數金額過濾 |
+| #8 | #8 | 產品 inner join 丟單 |
+| #9 | #10 | 驗證沒有斷言、collect 到 driver |
+| #10 | #11 | 執行順序與失敗處理 |
+| #11 | #5 | Python UDF 做乘法 |
+| #12 | #1 | CSV 不指定 schema、隱式轉型 |
+
 ## 問題編號索引
 
-| 報告問題（`code-review.md`「問題總表」） | 證據 |
+| 報告問題（新編號，`code-review.md`「問題總表」） | 證據（反引號內是腳本輸出的標籤，為舊編號） |
 |---|---|
-| #1 匯率 inner join 丟掉 TWD | E1 `[#1]` |
-| #2 replaceWhere 清表 | E2 `[#2]`；E5 `[2]` |
-| #3 append 重複、跨日更新 | E1 `[#3]`；E2 `[#3]`、`#5 組`；E3 `[#3]` |
-| #4 一對多 join 放大 | E1 `[#4]`；E2 `[#4]`；E7 |
-| #5 去重保留任意一筆 | E1 `[#5]`；E2 `#5 組`；E5 `[1]` |
-| #6 SCD2 邏輯不完整（屬性變化、同分、初始載入） | E1 `[#6]`；E3 `[#6]`；E4；E7 |
-| #7 非正數金額過濾 | E1 `[#7]` |
-| #12 CSV 不指定 schema、隱式轉型 | E3 `[#12]`；E5 `[3]`；E6 |
-| 4.6 靜態分析（ruff） | E8 |
+| #1 CSV 不指定 schema、隱式轉型 | E3 `[#12]`；E5 `[3]`；E6 |
+| #2 去重保留任意一筆 | E1 `[#5]`；E2 `#5 組`；E5 `[1]` |
+| #3 非正數金額過濾 | E1 `[#7]` |
+| #4 匯率 inner join 丟掉 TWD | E1 `[#1]` |
+| #6 SCD2 實作錯誤（replaceWhere 清表、屬性變化、同分、初始載入） | E1 `[#6]`；E2 `[#2]`；E3 `[#6]`；E4；E5 `[2]`；E7 |
+| #7 一對多 join 放大 | E1 `[#4]`；E2 `[#4]`；E7 |
+| #9 append 重複、跨日更新 | E1 `[#3]`；E2 `[#3]`、`#5 組`；E3 `[#3]` |
+| `appendix.md`「靜態分析（ruff、mypy）」 | E8 |
 | `notes/dataset/` 資料字典、增量檔觀察 | E9 |
-| #3（各增量檔與 base 重疊）、#12（金額例子） | E11 |
-| 5.3 若已部署到 prod：資料怎麼復原 | E10（報告引用 [2]、[3]；其餘情境為修正後 MERGE 的行為驗證） |
+| #9（各增量檔與 base 重疊）、#1（金額例子） | E11 |
+| `prod-recovery.md`（prod 資料怎麼復原） | E10（引用 [2]、[3]；其餘情境為修正後 MERGE 的行為驗證） |
+| #9、5.1（MERGE 來源同 key 多列）、#1（`enforceSchema`）、#4（換算乘法的型別） | E12 |
 
-## E1｜主要數字重算（#1、#3～#7）
+## E1｜主要數字重算（#2～#4、#6、#7、#9）
 
-第一輪驗收修正時重寫的重算腳本，涵蓋報告 #1、#3～#7 的主要數字。dataset 是 UTF-8 BOM，用 `encoding="utf-8-sig"` 讀；腳本放在 dataset 以外的目錄，以 `python3 -I partb_queries.py candidate_package/dataset` 執行。
+第一輪驗收修正時重寫的重算腳本，涵蓋報告 #2～#4、#6、#7、#9 的主要數字（輸出標籤為舊編號，見文首對照表）。dataset 是 UTF-8 BOM，用 `encoding="utf-8-sig"` 讀；腳本放在 dataset 以外的目錄，以 `python3 -I partb_queries.py candidate_package/dataset` 執行。
 
 ```python
 """重算 Part B 審查報告（code-review.md）的主要數字。用法：python3 -I partb_queries.py <dataset 目錄>"""
@@ -152,9 +171,9 @@ for name, rows in [("base", base), ("day1", d1), ("day2", d2), ("day3", load("or
 
 上面輸出的「撞號」是腳本當時的標籤，第二輪驗收後已改為「與官方語意不符的現象，需向上游確認」，數字不變。
 
-## E2｜第二輪驗收重算（#2、#3、#4、#5）
+## E2｜第二輪驗收重算（#2、#6、#7、#9）
 
-重算 #2、#3、#4 的新數字，並查 #3 的 603 列與 base 的三欄比對。以 `python3 -I recheck.py candidate_package/dataset` 執行。
+重算 #6、#7、#9 的新數字，並查 #9 的 603 列與 base 的三欄比對。以 `python3 -I recheck.py candidate_package/dataset` 執行。
 
 ```python
 """第二輪驗收重算：#3 三欄比對、#4 現行管線順序下的放大列數、#2 同分會員。用法：python3 -I recheck.py <dataset 目錄>"""
@@ -226,7 +245,7 @@ print(f"[#4] #1、#5 已修：進入 members join 的列={len(lat)}，join 後�
 [#4] #1、#5 已修：進入 members join 的列=4597，join 後多出 569 列
 ```
 
-## E3｜第三輪驗收重算（#6 初始載入、#12 金額最小值、#3 order_date 範圍）
+## E3｜第三輪驗收重算（#6 初始載入、#1 金額最小值、#9 order_date 範圍）
 
 腳本放在 dataset 以外的暫存目錄（`/tmp/partb_r3/`），2026-10-10 執行。
 
@@ -322,7 +341,7 @@ print(f"[#6] base（ISO）order_date 早於會員 register_date={sum(od(r) < reg
 [#6] base（ISO）order_date 早於會員 register_date=0
 ```
 
-## E5｜pyspark 語意驗證：#5 dropDuplicates＋window、#2 replaceWhere 清表、#12 隱式轉型的 explain
+## E5｜pyspark 語意驗證：#2 dropDuplicates＋window、#6 replaceWhere 清表、#1 隱式轉型的 explain
 
 原管線不執行，pyspark 只跑自建小資料。
 
@@ -405,7 +424,7 @@ pyspark 4.2.0
     錯誤 [CAST_INVALID_INPUT] The value '0.5' of the type "STRING" cannot be cast to "BIGINT" because it is malformed. Correct the value as per the syntax, or change its
 ```
 
-## E6｜ANSI 逐值測試與 day1 實際檔案（#12）
+## E6｜ANSI 逐值測試與 day1 實際檔案（#1）
 
 執行：`uv run python /tmp/partb_r3/ansi_each.py LionDEExam/candidate_package/dataset 2>/dev/null`。另以 `s.conf.get('spark.sql.ansi.enabled')` 確認 pyspark 4.2 預設為 `true`；三個增量檔不含小數點的 `amount` 列數都是 0（day1 4615、day2 4700、day3 4615 列）。
 
@@ -448,7 +467,7 @@ ansi=true day1: 錯誤 [CAST_INVALID_INPUT]
 
 發現：ANSI 開啟時不只 `0.5`，`100.0`、`83.24` 這類帶小數點的字串都無法轉成 bigint，day1 實際檔案也報錯；派工時的預期是「只有 0.5 會出事、目前不影響數字」，實測後改寫成「ANSI 關閉時不影響現在的數字，ANSI 開啟時整條管線失敗」。
 
-## E7｜同分隔離後仍對不到的訂單（#6、#4）
+## E7｜同分隔離後仍對不到的訂單（#6、#7）
 
 第四輪驗收後重算（`python3 -I`，`encoding="utf-8-sig"`）。舊紀錄只保留輸出，沒有保留腳本全文：
 
@@ -462,7 +481,7 @@ non-tie unmatched after stepwise MERGE 0
 意義：最新快照同分的 28 位會員都只有一個 `extract_date`，被同分隔離後進不了 dim，day1 去重後有 17 張訂單對不到任何版本；其餘會員逐批 MERGE 後 0 張對不到。
 
 
-## E8｜ruff 靜態分析（4.6）
+## E8｜ruff、mypy 靜態分析（appendix.md）
 
 `buggy_pipeline.py` 已由使用者從原始 zip 還原（179 行）。專案沒有 ruff 設定檔，用預設規則。
 
@@ -477,6 +496,34 @@ Found 3 errors.
 [*] 2 fixable with `--fix` (1 unsafe fix available with `--fix --unsafe-fixes`).
 ```
 
+mypy 用 `uv run --with mypy` 臨時安裝（不改 `pyproject.toml`），專案沒有 mypy 設定檔；pyspark 4.2 自帶型別資訊。
+
+```
+$ uv run --with mypy mypy --version
+mypy 2.4.0 (compiled: yes)
+$ uv run --with mypy mypy LionDEExam/candidate_package/buggy_pipeline.py
+Success: no issues found in 1 source file
+$ uv run --with mypy mypy --check-untyped-defs LionDEExam/candidate_package/buggy_pipeline.py
+LionDEExam/candidate_package/buggy_pipeline.py:159: error: Need type annotation for "counts" (hint: "counts: dict[<type>, <type>] = ...")  [var-annotated]
+Found 1 error in 1 file (checked 1 source file)
+$ uv run --with mypy mypy --strict LionDEExam/candidate_package/buggy_pipeline.py
+LionDEExam/candidate_package/buggy_pipeline.py:25: error: Function is missing a return type annotation  [no-untyped-def]
+LionDEExam/candidate_package/buggy_pipeline.py:39: error: Function is missing a type annotation  [no-untyped-def]
+LionDEExam/candidate_package/buggy_pipeline.py:64: error: Function is missing a type annotation  [no-untyped-def]
+LionDEExam/candidate_package/buggy_pipeline.py:67: error: Function is missing a type annotation  [no-untyped-def]
+LionDEExam/candidate_package/buggy_pipeline.py:86: error: Function is missing a type annotation  [no-untyped-def]
+LionDEExam/candidate_package/buggy_pipeline.py:124: error: Function is missing a type annotation  [no-untyped-def]
+LionDEExam/candidate_package/buggy_pipeline.py:151: error: Function is missing a type annotation  [no-untyped-def]
+LionDEExam/candidate_package/buggy_pipeline.py:159: error: Need type annotation for "counts" (hint: "counts: dict[<type>, <type>] = ...")  [var-annotated]
+LionDEExam/candidate_package/buggy_pipeline.py:168: error: Function is missing a return type annotation  [no-untyped-def]
+LionDEExam/candidate_package/buggy_pipeline.py:170: error: Call to untyped function "clean_orders" in typed context  [no-untyped-call]
+LionDEExam/candidate_package/buggy_pipeline.py:171: error: Call to untyped function "convert_currency" in typed context  [no-untyped-call]
+LionDEExam/candidate_package/buggy_pipeline.py:172: error: Call to untyped function "update_dim_member" in typed context  [no-untyped-call]
+LionDEExam/candidate_package/buggy_pipeline.py:173: error: Call to untyped function "build_fact" in typed context  [no-untyped-call]
+LionDEExam/candidate_package/buggy_pipeline.py:174: error: Call to untyped function "write_fact" in typed context  [no-untyped-call]
+Found 14 errors in 1 file (checked 1 source file)
+```
+
 ## E9｜資料字典的統計（`notes/dataset/`）
 
 舊紀錄只保留輸出摘要，沒有保留腳本全文：
@@ -485,7 +532,102 @@ Found 3 errors.
 - AI 自查：第一次統計 amount 用字串比大小（例如輸出 `min=100129.0 max=99863.0`），結果沒有意義。改成轉成 float 重算，文件中的數字都是重算後的值。
 - 增量檔 `updated_at`（`notes/dataset/incremental.md`）：day1 `updated_at` 日期分布 {07-01: 1325, 07-02: 1428, 07-03: 1415, 07-04: 442, 07-05: 5}，晚於批次日 3,290 筆；day1 最晚到 07-05（批次日後 4 天），day2 有 6 列早於批次日。
 
-## E10｜Delta 寫入後的錯誤處理：重跑、RESTORE、VACUUM、並行衝突（5.3）
+- amount 依幣別的分布與 base 極端值（2026-10-11 補，`notes/dataset/dictionary.md`「amount 分布」）：腳本存成 `amt.py`，以 `python3 -I amt.py candidate_package/dataset` 執行（在 `LionDEExam/` 下）。
+
+```python
+import csv, sys, statistics, glob, os, re
+d = sys.argv[1]
+for f in ["orders_base.csv","orders_incremental_day1.csv","orders_incremental_day2.csv","orders_incremental_day3.csv"]:
+    rows = list(csv.DictReader(open(os.path.join(d,f), encoding="utf-8-sig")))
+    bad = {}; by = {}
+    for r in rows:
+        a = r["amount"]; c = r["currency"]
+        try: v = float(a)
+        except ValueError:
+            bad[a] = bad.get(a,0)+1; continue
+        by.setdefault(c, []).append(v)
+    print(f"== {f}  rows={len(rows)}  無法轉數字={sum(bad.values())} {dict(list(bad.items())[:5])}")
+    for c, vs in sorted(by.items()):
+        vs.sort(); n=len(vs)
+        q = lambda p: vs[min(n-1,int(p*n))]
+        neg=sum(v<0 for v in vs); zero=sum(v==0 for v in vs)
+        print(f"  {c:4} n={n:6} min={vs[0]:>10} p25={q(.25):>9} p50={q(.5):>9} p75={q(.75):>9} p99={q(.99):>10} max={vs[-1]:>10}  <0={neg} =0={zero}")
+rows = list(csv.DictReader(open(os.path.join(d, "orders_base.csv"), encoding="utf-8-sig")))
+p99 = {"TWD": 837563, "JPY": 4075948, "USD": 26263.67, "NTD": 864376}  # 上面 base 的 p99
+out = [(r["currency"], float(r["amount"])) for r in rows if float(r["amount"]) > 2 * p99[r["currency"]]]
+print("base 超過該幣別 p99 兩倍:", len(out), {c: sum(x[0] == c for x in out) for c in p99})
+print(sorted(out, key=lambda x: -x[1])[:5])
+print("1000 的倍數:", sum(v % 1000 == 0 for _, v in out), "/", len(out))
+print("除以 1000 後 <= 該幣別 p99 的 1.2 倍:", sum(v / 1000 <= p99[c] * 1.2 for c, v in out), "/", len(out))
+```
+
+輸出：
+
+```
+== orders_base.csv  rows=100040  無法轉數字=0 {}
+  JPY  n= 11022 min=-3087159.0 p25= 465189.0 p50= 972567.0 p75=1861932.0 p99= 4075948.0 max=3738074000.0  <0=4 =0=0
+  NTD  n=   200 min=    2798.0 p25= 106874.0 p50= 222601.0 p75= 408388.0 p99=  864376.0 max=  916142.0  <0=0 =0=0
+  TWD  n= 66690 min= -594452.0 p25=  95622.0 p50= 202880.0 p75= 383857.0 p99=  837563.0 max=736710000.0  <0=29 =0=0
+  USD  n= 22128 min=  -27292.7 p25=  3027.64 p50=  6445.57 p75= 12084.64 p99=  26263.67 max=18074850.0  <0=17 =0=0
+== orders_incremental_day1.csv  rows=4615  無法轉數字=0 {}
+  JPY  n=   524 min=   33438.0 p25= 433011.0 p50=1013210.0 p75=1973066.0 p99= 4322152.0 max= 4804065.0  <0=0 =0=0
+  TWD  n=  3069 min=    2762.0 p25=  99837.0 p50= 211208.0 p75= 390220.0 p99=  833597.0 max=  975967.0  <0=0 =0=0
+  USD  n=  1022 min=     94.17 p25=  2993.88 p50=  6319.19 p75= 11946.64 p99=  25584.57 max=  29016.05  <0=0 =0=0
+== orders_incremental_day2.csv  rows=4700  無法轉數字=0 {}
+  JPY  n=   531 min=   12479.0 p25= 510401.0 p50=1062865.0 p75=1963982.0 p99= 3827568.0 max= 4489437.0  <0=0 =0=0
+  TWD  n=  3150 min=    2893.0 p25=  95583.0 p50= 198991.0 p75= 388861.0 p99=  819236.0 max=  974801.0  <0=0 =0=0
+  USD  n=  1019 min=      86.4 p25=  2851.13 p50=  6217.23 p75= 11807.82 p99=  26091.03 max=  29571.52  <0=0 =0=0
+== orders_incremental_day3.csv  rows=4615  無法轉數字=0 {}
+  JPY  n=   521 min=   12897.0 p25= 428930.0 p50= 912853.0 p75=1880873.0 p99= 4088927.0 max= 4456237.0  <0=0 =0=0
+  TWD  n=  3141 min=    2911.0 p25=  90574.0 p50= 195336.0 p75= 381218.0 p99=  831614.0 max=  938991.0  <0=0 =0=0
+  USD  n=   953 min=     83.24 p25=  3337.31 p50=  6799.42 p75= 12179.09 p99=  26323.13 max=  30769.42  <0=0 =0=0
+base 超過該幣別 p99 兩倍: 40 {'TWD': 27, 'JPY': 4, 'USD': 9, 'NTD': 0}
+[('JPY', 3738074000.0), ('JPY', 2308721000.0), ('JPY', 1903148000.0), ('TWD', 736710000.0), ('TWD', 622448000.0)]
+1000 的倍數: 31 / 40
+除以 1000 後 <= 該幣別 p99 的 1.2 倍: 40 / 40
+```
+
+- base 負數金額的調查（2026-10-11 補，`notes/dataset/dictionary.md`「amount 分布」）：檢查 50 筆負數從何而來（狀態、是否有對應原單、取絕對值後的量級）。腳本存成 `neg.py`，以 `python3 -I neg.py candidate_package/dataset` 執行（在 `LionDEExam/` 下）。
+
+```python
+import csv, sys, os, collections
+rows = list(csv.DictReader(open(os.path.join(sys.argv[1], "orders_base.csv"), encoding="utf-8-sig")))
+neg = [r for r in rows if float(r["amount"]) < 0]
+print("負數列:", len(neg), collections.Counter(r["currency"] for r in neg))
+print("負數列 order_status:", collections.Counter(r["order_status"] for r in neg))
+print("全體 order_status:", collections.Counter(r["order_status"] for r in rows))
+ids = {r["order_id"] for r in neg}
+print("負數列的 order_id 在 base 另有正數列:", sum(1 for r in rows if r["order_id"] in ids and float(r["amount"]) > 0))
+print("負數列 coupon_discount 為負:", sum(float(r["coupon_discount"]) < 0 for r in neg))
+by = collections.defaultdict(list)
+for r in rows:
+    v = float(r["amount"])
+    if v > 0: by[r["currency"]].append(v)
+for c in ("TWD", "USD", "JPY"):
+    pos = sorted(by[c]); a = sorted(-float(r["amount"]) for r in neg if r["currency"] == c)
+    within = sum(pos[0] <= x <= pos[int(.99 * len(pos))] for x in a)
+    print(f"{c}: 取絕對值後落在正數列 min~p99 內 {within}/{len(a)}")
+for r in neg[:3]:
+    print({k: r[k] for k in ("order_id", "currency", "amount", "order_status", "quantity", "coupon_discount")})
+```
+
+輸出：
+
+```
+負數列: 50 Counter({'TWD': 29, 'USD': 17, 'JPY': 4})
+負數列 order_status: Counter({'paid': 19, 'completed': 18, 'cancelled': 7, 'created': 6})
+全體 order_status: Counter({'paid': 42894, 'completed': 28612, 'created': 14286, 'cancelled': 14248})
+負數列的 order_id 在 base 另有正數列: 0
+負數列 coupon_discount 為負: 1
+TWD: 取絕對值後落在正數列 min~p99 內 29/29
+USD: 取絕對值後落在正數列 min~p99 內 16/17
+JPY: 取絕對值後落在正數列 min~p99 內 4/4
+{'order_id': 'ORD00034533', 'currency': 'TWD', 'amount': '-89782.0', 'order_status': 'paid', 'quantity': '1', 'coupon_discount': '200.0'}
+{'order_id': 'ORD00031409', 'currency': 'TWD', 'amount': '-331736.0', 'order_status': 'completed', 'quantity': '2', 'coupon_discount': '400.0'}
+{'order_id': 'ORD00018643', 'currency': 'USD', 'amount': '-17089.38', 'order_status': 'completed', 'quantity': '3', 'coupon_discount': '250.0'}
+```
+
+## E10｜Delta 寫入後的錯誤處理：重跑、RESTORE、VACUUM、並行衝突（prod-recovery.md）
 
 驗證報告建議的 fact 寫法（以 `order_id` MERGE，`whenMatchedUpdateAll(condition="s.updated_at > t.updated_at")`＋`whenNotMatchedInsertAll`）寫入之後，出錯時能不能復原。不讀 dataset，只用自建的幾列小資料（`order_id`、`order_status`、`updated_at`），Delta 表寫在 `/tmp` 下的暫存目錄，跑完刪除。
 
@@ -791,9 +933,9 @@ spark.stop()
 
 - `[6]` 結論：修正批次的 `updated_at` 與錯誤批次相同（T2）時，`s.updated_at > t.updated_at` 不成立，MERGE 仍提交了 v2，但 `numTargetRowsUpdated=0`，**O1 最後仍是錯誤的 `cancelled`**。對照組修正批次用 T3 時，`numTargetRowsUpdated=1`，O1 被覆蓋成 `paid`。
 
-## E11｜各增量檔與 orders_base 重疊的 order_id（#3）
+## E11｜各增量檔與 orders_base 重疊的 order_id（#9）
 
-補上 #3 (b)「day2、day3 各約 600 筆」的依據，以及 #12 (b) 的金額例子 `13100.0`（見本節末）。執行：`python3 -I q.py LionDEExam/candidate_package/dataset`（在 `LionTest/`）。
+補上 #9 (b)「day2、day3 各約 600 筆」的依據，以及 #1 (b) 的金額例子 `13100.0`（見本節末）。執行：`python3 -I q.py LionDEExam/candidate_package/dataset`（在 `LionTest/`）。
 
 ```python
 import csv, sys
@@ -820,3 +962,99 @@ $ grep -n "13100.0" LionDEExam/candidate_package/dataset/orders_incremental_day1
 2:ORD00102010,M002283,P00096,app,created,2,TWD,13100.0,500.0,2026-07-01T05:51:32
 ```
 
+## E12｜Delta MERGE 來源同 key 多列、CSV `enforceSchema`、換算乘法的型別（#9、#1、#4）
+
+驗收時發現報告原本寫「MERGE 來源同一個 `order_id` 有多列會直接報錯」不完整，用小資料重測；同一支腳本也測 #1 (c) 的 `enforceSchema` 與 #4 (c) 乘法的型別。執行：在 `LionTest/` 用 `uv run python /tmp/partb_e12/e12.py LionDEExam/candidate_package/dataset 2>/dev/null`（pyspark 4.2.0、delta-spark 4.4.1，預設 ANSI 開啟）。
+
+```python
+"""E12：(1) Delta MERGE 來源同 key 多列的行為；(2) header＋自訂 schema 時 enforceSchema 的行為；(3) #4 換算乘法的型別。用法：uv run python e12.py <dataset 目錄>"""
+import shutil, sys, tempfile, delta, pyspark
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.types import StructType, StructField, StringType, DecimalType
+from delta import configure_spark_with_delta_pip
+from delta.tables import DeltaTable
+spark = configure_spark_with_delta_pip(SparkSession.builder.master("local[1]").config("spark.ui.enabled", "false")
+    .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+    .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")).getOrCreate()
+spark.sparkContext.setLogLevel("OFF")
+print("pyspark", pyspark.__version__, "delta-spark", __import__("importlib.metadata").metadata.version("delta-spark"), "ansi", spark.conf.get("spark.sql.ansi.enabled"))
+
+# (1) MERGE：target 有 O1；來源 O1 兩列（對到既有列）、O9 兩列（target 沒有）
+sch = "order_id string, order_status string, updated_at string, amount_twd int"
+def run(label, src_rows):
+    path = tempfile.mkdtemp() + "/fact"
+    spark.createDataFrame([("O1", "paid", "T1", 500)], sch).write.format("delta").save(path)
+    src = spark.createDataFrame(src_rows, sch)
+    try:
+        (DeltaTable.forPath(spark, path).alias("t").merge(src.alias("s"), "t.order_id = s.order_id")
+            .whenMatchedUpdateAll(condition="s.updated_at > t.updated_at")
+            .whenNotMatchedInsertAll().execute())
+        print(f"[1] {label}: 成功", sorted(tuple(r) for r in spark.read.format("delta").load(path).collect()))
+    except Exception as e:
+        print(f"[1] {label}: 錯誤", str(e).splitlines()[0][:110])
+    shutil.rmtree(path.rsplit("/", 1)[0])
+run("來源 O1 兩列（target 已有 O1）", [("O1", "completed", "T2", 500), ("O1", "completed", "T3", 500)])
+run("來源 O9 兩列（target 沒有 O9）", [("O9", "paid", "T2", 100), ("O9", "paid", "T3", 100)])
+
+# (2) enforceSchema：day1 實際檔（UTF-8 BOM 表頭），以及欄位順序對調的小檔
+d = sys.argv[1]
+names = ["order_id", "member_id", "product_id", "channel", "order_status", "quantity", "currency",
+         "amount", "coupon_discount", "order_created_at", "departure_date", "updated_at"]
+schema = StructType([StructField(n, DecimalType(18, 2) if n in ("amount", "coupon_discount") else StringType()) for n in names])
+for enforce in ("true", "false"):
+    try:
+        df = (spark.read.option("header", True).option("mode", "FAILFAST").option("enforceSchema", enforce)
+              .schema(schema).csv(f"{d}/orders_incremental_day1.csv"))
+        print(f"[2] day1 enforceSchema={enforce}: 列數", df.count(), "第一列", tuple(df.first())[:8])
+    except Exception as e:
+        print(f"[2] day1 enforceSchema={enforce}: 錯誤", str(e).splitlines()[0][:140])
+tmp = tempfile.mkdtemp()
+with open(f"{tmp}/swap.csv", "w", encoding="utf-8-sig") as f:   # 表頭把 amount 與 coupon_discount 對調
+    f.write("order_id,coupon_discount,amount\nO1,500.0,13100.0\n")
+s3 = StructType([StructField("order_id", StringType()), StructField("amount", DecimalType(18, 2)),
+                 StructField("coupon_discount", DecimalType(18, 2))])
+for enforce in ("true", "false"):
+    try:
+        df = spark.read.option("header", True).option("mode", "FAILFAST").option("enforceSchema", enforce).schema(s3).csv(f"{tmp}/swap.csv")
+        print(f"[2] 欄位對調 enforceSchema={enforce}:", [r.asDict() for r in df.collect()])
+    except Exception as e:
+        msg = next((l for l in str(e).splitlines() if "header" in l.lower()), str(e).splitlines()[0])
+        print(f"[2] 欄位對調 enforceSchema={enforce}: 錯誤", msg.strip()[:160])
+shutil.rmtree(tmp)
+
+# (3) #4 乘法：無 schema 時 amount、rate_to_twd 都是字串
+r = spark.createDataFrame([("TWD", "100.0", None), ("USD", "100.0", "31.403")], "currency string, amount string, rate_to_twd string")
+cases = {
+    "字串 * 字串": F.col("amount") * F.col("rate_to_twd"),
+    "decimal * double": F.col("amount").cast("decimal(18,2)") * F.col("rate_to_twd").cast("double"),
+    "when(lit(1)).otherwise(字串)": F.col("amount").cast("decimal(18,2)") * F.when(F.col("currency") == "TWD", F.lit(1)).otherwise(F.col("rate_to_twd")),
+    "兩邊都先 cast decimal": F.col("amount").cast("decimal(18,2)") * F.when(F.col("currency") == "TWD", F.lit(1).cast("decimal(18,6)")).otherwise(F.col("rate_to_twd").cast("decimal(18,6)")),
+}
+for label, expr in cases.items():
+    try:
+        x = r.select(expr.alias("t"))
+        print(f"[3] {label}: 型別 {x.schema[0].dataType.simpleString()} 值 {[row[0] for row in x.collect()]}")
+    except Exception as e:
+        print(f"[3] {label}: 錯誤", str(e).splitlines()[0][:110])
+spark.stop()
+```
+
+輸出：
+
+```
+pyspark 4.2.0 delta-spark 4.4.1 ansi true
+[1] 來源 O1 兩列（target 已有 O1）: 錯誤 [DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE] Cannot perform Merge as multiple source rows matched 
+[1] 來源 O9 兩列（target 沒有 O9）: 成功 [('O1', 'paid', 'T1', 500), ('O9', 'paid', 'T2', 100), ('O9', 'paid', 'T3', 100)]
+[2] day1 enforceSchema=true: 列數 4615 第一列 ('ORD00102010', 'M002283', 'P00096', 'app', 'created', '2', 'TWD', Decimal('13100.00'))
+[2] day1 enforceSchema=false: 列數 4615 第一列 ('ORD00102010', 'M002283', 'P00096', 'app', 'created', '2', 'TWD', Decimal('13100.00'))
+[2] 欄位對調 enforceSchema=true: [{'order_id': 'O1', 'amount': Decimal('500.00'), 'coupon_discount': Decimal('13100.00')}]
+[2] 欄位對調 enforceSchema=false: 錯誤 Caused by: org.apache.spark.SparkIllegalArgumentException: CSV header does not conform to the schema.
+[3] 字串 * 字串: 錯誤 [DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE] Cannot resolve "(amount * rate_to_twd)" due to data type mismatch: th
+[3] decimal * double: 型別 double 值 [None, 3140.2999999999997]
+[3] when(lit(1)).otherwise(字串): 錯誤 [CAST_INVALID_INPUT] The value '31.403' of the type "STRING" cannot be cast to "BIGINT" because it is malforme
+[3] 兩邊都先 cast decimal: 型別 decimal(37,8) 值 [Decimal('100.00000000'), Decimal('3140.30000000')]
+```
+
+- `[1]` 結論：來源同 key 多列且對到目標既有列時報 `DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE`；目標沒有的 key 則**不報錯**，兩列都被 insert（O9 變成兩列）。所以 MERGE 前一定要先讓來源每個 key 只剩一列。
+- `[2]` 結論：day1 實際檔（表頭含 UTF-8 BOM）在 `enforceSchema` 為 true 或 false 時都能正常讀取，列數 4615。表頭欄位對調時，`enforceSchema=true` 照位置套 schema，`amount` 和 `coupon_discount` 靜默互換；`enforceSchema=false` 報 `CSV header does not conform to the schema`。
+- `[3]` 結論：ANSI 開啟時字串相乘報 `DATATYPE_MISMATCH`；decimal 乘 double 結果是 double；`when(F.lit(1))` 配字串匯率會被轉成 bigint 而報 `CAST_INVALID_INPUT`；兩邊都先 cast 成 decimal 才得到 decimal 結果，TWD（匯率 null）也正確算出 100。

@@ -80,7 +80,7 @@ log = [
 | 約束 | 主鍵、唯一鍵、外鍵由資料庫擋 | 不強制主鍵、唯一鍵，重複資料照樣寫得進去；`NOT NULL`、`CHECK` 約束會擋 |
 | 版本 | 只有目前狀態 | 每張表各自有版本，每次寫入前進一版；不同表之間的寫入不是同一個交易 |
 
-最後兩列跟 Part B 直接相關：`order_id` 不會被表擋下重複，所以 #3 的 append 會默默寫出重複訂單，去重和 MERGE 要由 pipeline 自己負責；一次執行會讓 `dim_member` 和 `fact_order` 各前進一版，兩者不會一起成功或一起失敗（#10）。
+最後兩列跟 Part B 直接相關：`order_id` 不會被表擋下重複，所以 #9 的 append 會默默寫出重複訂單，去重和 MERGE 要由 pipeline 自己負責；一次執行會讓 `dim_member` 和 `fact_order` 各前進一版，兩者不會一起成功或一起失敗（#11）。
 
 ## 什麼時候用、什麼時候不要用
 - **Warehouse**：資料量中等、主要給 BI 報表查、團隊熟 SQL、想要少維運。
@@ -125,8 +125,8 @@ ConversionException
 Delta 的記帳本沒有在本機實跑（需要 Spark＋Java），上面的 Python 只是示意。
 
 ## 常見的坑
-- **把 lake 當成 warehouse 用**：CSV 不定 schema，所有欄位都是字串，金額比大小靠隱式轉型（Part B #12）。
-- **以為 lakehouse 的舊版本永遠都在**：VACUUM 會真正刪掉作廢超過保留期的舊檔，刪了就不能 time travel；就算沒跑 VACUUM，記帳本本身超過保留期被清掉，舊版本也一樣回不去（Part B #2 的 dim 被覆寫，只在保留期內、VACUUM 之前救得回來）。VACUUM 的預設保留期是 7 天（PROTOCOL.md）；log 的預設保留期一般說法是 30 天，未證實。
+- **把 lake 當成 warehouse 用**：CSV 不定 schema，所有欄位都是字串，金額比大小靠隱式轉型（Part B #1）。
+- **以為 lakehouse 的舊版本永遠都在**：VACUUM 會真正刪掉作廢超過保留期的舊檔，刪了就不能 time travel；就算沒跑 VACUUM，記帳本本身超過保留期被清掉，舊版本也一樣回不去（Part B #6 的 dim 被覆寫，只在保留期內、VACUUM 之前救得回來）。VACUUM 的預設保留期是 7 天（PROTOCOL.md）；log 的預設保留期一般說法是 30 天，未證實。
 - **lake 裡的原始檔被覆蓋或刪掉**：之後表寫壞了就沒有原料可以重做。
 
 ## 本專案出處

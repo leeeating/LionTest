@@ -95,6 +95,41 @@ AI 原本請使用者自己先讀 `buggy_pipeline.py`。使用者回：「你應
 
 - 依據：commit `fbf92f4`；`part_b/evidence.md` E10
 
+### 2026-10-11｜Part B｜報告改版：主檔只講問題與修法，照程式流程排
+
+使用者認為「code reivew應該要拆成多分檔案 主軸要是讓對方理解code的問題 以及怎麼修改 其他讓我理解的內容拆成其他檔案」。AI 提出拆法：方法與 linter 進附錄、prod 復原獨立一份、資料流背景移到 notes，使用者同意。之後他再問「還可以在簡化嗎」，接著提出「SCD2 實作可以寫成一個問題吧 如果都要一起修」，以及「我想大改成用流程順序來說明」。中間 AI 把「放在一起」理解成三種可能，回頭確認，他的答案是「11個問題放在同一個 但其他輔助個分出去」。第 4 節因此照 `main()` 的 6 個步驟重排，舊 #2、#6 合併成新 #6，編號改成 #1～#11；evidence 的腳本輸出保留舊編號，文首加對照表。照流程排的理由（使用者原話）：「照流程符合閱讀code的思考邏輯」。
+
+驗收 agent 抓到 AI 自己建議的簡化刪過頭：#6 刪掉「dataset 的 city 沒有 null、缺值用 `N/A`」的旁註後，讀者會以為現有資料真的會因為 null 漏掉變更，於是補回一句短的限定。
+
+- 依據：commit 待補
+
+### 2026-10-11｜Part B｜用 show-me 改成「圖＋diff」，驗收實跑才發現修法照貼跑不起來
+
+使用者問 AI「你有嘗試使用show me來說明嗎」，接著要求「使用show me的想法說明 問題跟寫文件」。AI 先改 #4 當樣本，使用者看過後說「照這個格式改全部」：每條改成一兩句說明加一張示意圖，修正改成對照原碼的 diff。
+
+驗收 agent 把全部 diff 套到程式副本、用 day1 實跑，三輪才通過。抓到的錯誤：
+- AI 自己寫的 #4 樣本沒刪掉原本的 UDF 那行，left join 後 TWD 的匯率是 null，UDF 報 `TypeError`；縮排也和原碼不同。
+- #5 改成內建乘法後，沒有 schema 時金額是字串，ANSI 開啟下直接報型別錯誤。修法是兩邊都明確 cast 成 decimal（E12）。
+- #6 的 diff 照貼會出現 NameError；#10 的對帳和 #4、#8 的隔離對不上（隔離列沒有從主流程拿掉）；第一次執行時 fact 表不存在，MERGE 會失敗；MERGE 要用的 `updated_at` 沒進 fact。
+
+同一段時間，使用者要求「在多跑一個mypy」。結果是 11 個問題 mypy 一個都抓不到。AI 寫「函式都沒有型別標註，所以 mypy 沒看」，驗收 agent 指出 `load_sources`、`main` 有參數標註，mypy 有檢查，只是型別上全都是 `DataFrame`。
+
+- 依據：commit 待補；`part_b/evidence.md` E8、E12
+
+### 2026-10-11｜Part B｜實測推翻舊版報告的兩個技術說法
+
+上面的改寫過程中，有兩個從舊版報告就存在的錯誤被實測推翻：
+- **`mode("FAILFAST")`**：舊版 #12（現在的 #1）寫 `spark.read....mode("FAILFAST")`，但 DataFrameReader 沒有 `mode` 方法（`hasattr` 為 False），正確寫法是 `.option("mode", "FAILFAST")`。由改寫的 subagent 發現，驗收 agent 確認。
+- **「MERGE 的來源若同一個 key 有多列會直接報錯」**：驗收 agent 用 delta-spark 實測，只有對到 target 既有列時才報 `DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE`；target 沒有的 key 在來源重複，會**靜默插入多列**，風險比原本寫的更大。報告 #9、5.1 和 `learning/merge-idempotent-write.md` 都已更正。
+
+- 依據：commit 待補；`part_b/evidence.md` E12
+
+### 2026-10-11｜Part B｜「負數？？」：base 的負數金額不是退款
+
+使用者要求看 amount 的分布，AI 整理時寫「base 有 50 筆負數」，報告 #3 (b) 也寫「退款不會沖銷營收」，把負數當成退款。使用者看到筆記後問「負數？？」。AI 實際查了這 50 列：狀態以 paid、completed 為主，同 order_id 沒有對應的正數原單，取絕對值後是正常金額，官方 README 也沒有退款狀態。結論是「負數 = 退款」沒有依據，比較像正負號錯誤（未查證），留給 A-3。同一次整理也發現 base 有 40 筆極端大值，除以 1,000 後全部回到正常範圍，疑似多乘了 1,000（未查證），一併留給 A-3。#3 的改寫方向由使用者決定：「不要以退款為方向說明 可以朝向 為什麼出現負數 如果schema有限制大於零 需要開卡debug為什麼會出現」。#3 因此改成：`amount > 0` 是資料契約，違反就隔離、告警、開卡追上游，不再用退款舉例。
+
+- 依據：`part_b/evidence.md` E9（負數調查）；commit 待補
+
 ### 〔進行中〕Part B｜審閱報告初稿
 
 接下來由使用者逐條審閱報告並用自己的話定稿。#12 的嚴重度（目前 P2）他決定暫不處理。〔待使用者確認〕

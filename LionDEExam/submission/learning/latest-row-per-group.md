@@ -58,7 +58,7 @@ C3 paid      2026-05-04 00:00   <- 同分，這個結果不可靠，見下
 
 ## 本專案出處
 - `clean_orders` 中的 `dropDuplicates(["order_id"])` 與 `orderBy(F.col("order_created_at").desc())`
-- `part_b/code-review.md` 的 #5「去重保留的是任意一筆，不是最新狀態」；證據在 `part_b/evidence.md`
+- `part_b/code-review.md` 的 #2「去重保留的是任意一筆，不是最新狀態」；證據在 `part_b/evidence.md`
 - `notes/part_b/dedup.md`「為什麼不能直接去重」
 
 ## 官方文件

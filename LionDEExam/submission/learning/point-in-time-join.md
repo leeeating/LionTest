@@ -72,8 +72,8 @@ ASOF + CASE WHEN order_date < valid_to THEN level END -> O1 2026-05-15 NULL
 - **`valid_to` 用 NULL 代表目前版本**時，`< valid_to` 會 NULL 比較失敗；本專案用 `9999-12-31`。
 
 ## 本專案出處
-- `part_b/code-review.md` #4：`build_fact` 中的 `converted.join(members, "member_id", "left")`，改 join `dim_member` 並用半開區間。
-- `part_b/code-review.md` #6 (c)「初始載入」：回填歷史與第一版 `valid_from`。
+- `part_b/code-review.md` #7：`build_fact` 中的 `converted.join(members, "member_id", "left")`，改 join `dim_member` 並用半開區間。
+- `part_b/appendix.md`「SCD2 初始載入」（報告 #6 (c) 的補充）：回填歷史與第一版 `valid_from`。
 - [scd.md](scd.md)：王小明例子與「第一版的 `valid_from` 定在哪」。
 
 ## 官方文件

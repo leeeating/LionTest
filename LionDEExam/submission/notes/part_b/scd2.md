@@ -13,10 +13,10 @@
 
 ## 建議修法（針對 `update_dim_member`）
 
-用 Delta MERGE 分兩段：先把有變更的會員的目前版本關閉（設定 `valid_to`、`is_current=false`），再插入新版本和新會員。比較時用 null-safe 的 `eqNullSafe`。完整寫法見報告 4.3。
+用 Delta MERGE 分兩段：先把有變更的會員的目前版本關閉（設定 `valid_to`、`is_current=false`），再插入新版本和新會員。比較時用 null-safe 的 `eqNullSafe`。完整寫法見報告 4.4。
 
 **這份程式特有的陷阱：只拿最新快照。** 上面的 MERGE 每次只拿每位會員最新的 `extract_date`。dim 從空表開始時直接拿現在的 `members.csv` 跑，04-30、05-31 的舊版進不來，上面那 434 人的舊等級就丟了。再搭配半開區間 join，早於唯一一版 `valid_from` 的訂單對不到任何版本，等級變成 null：day1 去重後 4,597 張中有 49 張是這樣。初始載入的做法見 learning（依快照日由舊到新回填）。
 
 **第一版 `valid_from` 取第一筆快照日的後果（本題資料）**：目前資料不含被隔離的 28 位同分會員時，day1 有 17 張對不到，要靠 #6 的隔離告警處理，其餘 0 張。其他選項（`register_date`、很早的固定日期）的取捨見 learning。
 
-細節與數字見報告 #6 (c)「初始載入」。
+細節與數字見[附錄「SCD2 初始載入」](../../part_b/appendix.md#scd2-初始載入)（報告 #6 (c) 的補充）。
