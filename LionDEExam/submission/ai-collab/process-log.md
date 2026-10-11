@@ -146,7 +146,7 @@ AI 原本請使用者自己先讀 `buggy_pipeline.py`。使用者回：「你應
 
 使用者質疑 F3（依 `order_date` 分區產生小檔）：「可能只是demo的數量 prod可能不是這樣」。審查 agent 的結論是從題目資料一天約 4.6k 列推出來的；檔案小不小取決於每個分區每次寫入的量，demo 資料判斷不了。F3 因此改成「待取得 prod 資料量再評估」，並區分出與資料量無關的部分（每批碰到幾個分區，取決於舊訂單更新分散在幾個日期）。A、B 兩類如何處理尚待使用者決定。
 
-- 依據：commit 待補；`part_b/future-improvements.md`
+- 依據：commit `0ff4d83`；`part_b/future-improvements.md`
 
 ### 〔進行中〕Part B｜審閱報告初稿
 
