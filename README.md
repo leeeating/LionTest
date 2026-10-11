@@ -57,9 +57,9 @@ LionTest/
         ├── notes/            理解問題時的筆記（資料字典、概念說明）
         ├── learning/         討論中選出的可遷移觀念筆記
         ├── decisions/        設計決策（ADR）
-        └── ai-collab/        AI 協作紀錄（流程紀錄、完整對話、一頁報告）
+        └── ai-collab/        AI 協作紀錄（流程紀錄、一頁報告；完整對話另附）
 ```
 
 ## AI 協作怎麼記錄
 
-以六步驟為工作方法：使用者先看 → 拆解 → 委派 → 驗證 → 修正 → 使用者定案；「你先看」指 AI 先出初稿、使用者審閱並提出質疑，不是使用者從零自己做。過程記在 `LionDEExam/submission/ai-collab/process-log.md`，包括 AI 在哪裡出錯、是誰發現的、怎麼修正的。完整對話紀錄在 `ai-collab/transcripts/`。
+以六步驟為工作方法：使用者先看 → 拆解 → 委派 → 驗證 → 修正 → 使用者定案；「你先看」指 AI 先出初稿、使用者審閱並提出質疑，不是使用者從零自己做。過程記在 `LionDEExam/submission/ai-collab/process-log.md`，包括 AI 在哪裡出錯、是誰發現的、怎麼修正的。完整對話紀錄以去識別化的原始 session jsonl 壓縮檔另附。

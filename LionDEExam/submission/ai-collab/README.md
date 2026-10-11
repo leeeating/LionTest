@@ -7,7 +7,7 @@
 | 報告 | 各 Part 繳交物、`ai-collab-report.md`（一頁 AI 協作報告） | 結果文件，給閱卷者讀 |
 | 過程 | `process-log.md` | 使用者的思考過程，依部分分節的事件 |
 | 改動 | git log | 每次檔案改了什麼；commit 訊息末行 `Session: <session id 前 8 碼>`（從 2026-10-10 三層制度起的 commit 適用） |
-| 原始 | `transcripts/*.md` | 完整對話（含 subagent），由 `export_transcripts.py` 從 session log 轉出 |
+| 原始 | 另附的 session jsonl 壓縮檔 | 完整對話（含 subagent 與過長的工具輸出），原始 Claude Code session log 去識別化後壓縮，繳交時另附 |
 
 追溯一個結論的路徑：報告 → process-log 事件 → commit → 對話。
 

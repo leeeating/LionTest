@@ -49,7 +49,7 @@ LionTest/                              git repo 根目錄
 | process-log | **使用者的思考過程**：質疑了什麼、為什麼這樣決定、方向怎麼轉；不求嚴謹，時間軸 | `ai-collab/process-log.md`（全專案一份） |
 | 報告 | 給閱卷者的結果文件 | 各 Part 繳交物、`ai-collab/ai-collab-report.md` |
 
-最底層是完整對話（`ai-collab/transcripts/`），三層都可追溯到它。
+最底層是完整對話（繳交時另附去識別化的 session jsonl 壓縮檔），三層都可追溯到它。
 - 事件格式見 `ai-collab/README.md`。六步驟是工作方法，不是紀錄格式；不用每個交付物寫滿六節。
 - **AI 每記一個事件就在回覆最後一行寫「已記錄事件：<標題>」**，使用者可當場否決。
 - **AI 要主動提醒使用者更新文件**：一個方向定案、一段討論告一段落、使用者說出判斷理由、或發現值得記的觀念時，在回覆最後一行提醒要更新哪一份（process-log、notes、learning、報告），附一句建議內容，由使用者決定記不記。
@@ -73,5 +73,5 @@ LionTest/                              git repo 根目錄
 Part C 設計文件**每一節**標註 `〔AI 產出〕`、`〔AI 產出，使用者修改〕` 或 `〔使用者判斷〕`（題目要求）。其他 Part 不逐節標註，靠 process-log 與 git 追溯。
 
 ## Session 開始與收尾
-- 收尾：取得本 session id（`ls -t ~/.claude/projects/*-OpenSource-LionTest/*.jsonl | head -1` 的檔名），確認本 session 的事件依據都寫了它，再執行 `python3 LionDEExam/submission/ai-collab/export_transcripts.py --session <session id>` 只匯出這個 session 的完整對話 md（不加 `--session` 會連環境建置的 session 一起匯出）。
-- 收尾時轉出的紀錄缺最後幾則訊息；**打包繳交前，使用者在 session 外再跑一次** export 腳本。
+- 收尾：取得本 session id（`ls -t ~/.claude/projects/*-OpenSource-LionTest/*.jsonl | head -1` 的檔名），確認本 session 的事件依據都寫了它。不另外匯出對話。
+- 完整對話以**去識別化的原始 session jsonl 壓縮檔**繳交（含 `<session id>/subagents/`、`<session id>/tool-results/`），等最後測試完成、打包繳交前才做，遮蔽後逐行驗證 JSON 仍有效。
