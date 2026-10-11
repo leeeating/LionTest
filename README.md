@@ -9,7 +9,7 @@
 | Part | 內容 | 繳交物 | 狀態 |
 |---|---|---|---|
 | A | 星型模型、增量 ETL、資料品質報告 | `LionDEExam/submission/part_a/` | 未開始 |
-| B | `buggy_pipeline.py` 程式碼審查 | [`part_b/code-review.md`](LionDEExam/submission/part_b/code-review.md) | 初稿，待使用者定稿 |
+| B | `buggy_pipeline.py` 程式碼審查 | [`part_b/code-review.md`](LionDEExam/submission/part_b/code-review.md) | 已定稿；之後改善項目見 `part_b/future-improvements.md` |
 | C | 架構設計 | `LionDEExam/submission/part_c/` | 未開始 |
 | 進階模組 | D／E／F 三選一 | `LionDEExam/submission/module_x/` | 未選定 |
 
