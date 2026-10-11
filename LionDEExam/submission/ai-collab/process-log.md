@@ -101,7 +101,7 @@ AI 原本請使用者自己先讀 `buggy_pipeline.py`。使用者回：「你應
 
 驗收 agent 抓到 AI 自己建議的簡化刪過頭：#6 刪掉「dataset 的 city 沒有 null、缺值用 `N/A`」的旁註後，讀者會以為現有資料真的會因為 null 漏掉變更，於是補回一句短的限定。
 
-- 依據：commit 待補
+- 依據：commit `4118132`
 
 ### 2026-10-11｜Part B｜用 show-me 改成「圖＋diff」，驗收實跑才發現修法照貼跑不起來
 
@@ -114,7 +114,7 @@ AI 原本請使用者自己先讀 `buggy_pipeline.py`。使用者回：「你應
 
 同一段時間，使用者要求「在多跑一個mypy」。結果是 11 個問題 mypy 一個都抓不到。AI 寫「函式都沒有型別標註，所以 mypy 沒看」，驗收 agent 指出 `load_sources`、`main` 有參數標註，mypy 有檢查，只是型別上全都是 `DataFrame`。
 
-- 依據：commit 待補；`part_b/evidence.md` E8、E12
+- 依據：commit `4118132`；`part_b/evidence.md` E8、E12
 
 ### 2026-10-11｜Part B｜實測推翻舊版報告的兩個技術說法
 
@@ -122,13 +122,13 @@ AI 原本請使用者自己先讀 `buggy_pipeline.py`。使用者回：「你應
 - **`mode("FAILFAST")`**：舊版 #12（現在的 #1）寫 `spark.read....mode("FAILFAST")`，但 DataFrameReader 沒有 `mode` 方法（`hasattr` 為 False），正確寫法是 `.option("mode", "FAILFAST")`。由改寫的 subagent 發現，驗收 agent 確認。
 - **「MERGE 的來源若同一個 key 有多列會直接報錯」**：驗收 agent 用 delta-spark 實測，只有對到 target 既有列時才報 `DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE`；target 沒有的 key 在來源重複，會**靜默插入多列**，風險比原本寫的更大。報告 #9、5.1 和 `learning/merge-idempotent-write.md` 都已更正。
 
-- 依據：commit 待補；`part_b/evidence.md` E12
+- 依據：commit `4118132`；`part_b/evidence.md` E12
 
 ### 2026-10-11｜Part B｜「負數？？」：base 的負數金額不是退款
 
 使用者要求看 amount 的分布，AI 整理時寫「base 有 50 筆負數」，報告 #3 (b) 也寫「退款不會沖銷營收」，把負數當成退款。使用者看到筆記後問「負數？？」。AI 實際查了這 50 列：狀態以 paid、completed 為主，同 order_id 沒有對應的正數原單，取絕對值後是正常金額，官方 README 也沒有退款狀態。結論是「負數 = 退款」沒有依據，比較像正負號錯誤（未查證），留給 A-3。同一次整理也發現 base 有 40 筆極端大值，除以 1,000 後全部回到正常範圍，疑似多乘了 1,000（未查證），一併留給 A-3。#3 的改寫方向由使用者決定：「不要以退款為方向說明 可以朝向 為什麼出現負數 如果schema有限制大於零 需要開卡debug為什麼會出現」。#3 因此改成：`amount > 0` 是資料契約，違反就隔離、告警、開卡追上游，不再用退款舉例。
 
-- 依據：`part_b/evidence.md` E9（負數調查）；commit 待補
+- 依據：`part_b/evidence.md` E9（負數調查）；commit `4118132`
 
 ### 〔進行中〕Part B｜審閱報告初稿
 
