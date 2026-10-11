@@ -1,0 +1,494 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>buggy_pipeline.py 部署前審查</title><style>
+:root{--bg:#fbfaf7;--ink:#1d2330;--mute:#5e6878;--line:#e6e3dc;--p0:#c93c37;--p1:#c08a00;--p2:#7b8494;--acc:#1f5fbf;--ok:#1a7f37}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.85 -apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif}
+main{max-width:860px;margin:0 auto;padding:0 22px 96px}
+code{font:.84em/1.5 ui-monospace,Menlo,Consolas,monospace;background:#efece5;padding:.1em .35em;border-radius:4px}
+a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
+.hero{background:#14181f;color:#f4f1ea;padding:80px 22px 64px}.hero .in{max-width:860px;margin:0 auto}
+.hero small{color:#9aa3b2;letter-spacing:.12em;font-size:.8rem}
+.hero h1{font-size:2.3rem;line-height:1.35;margin:.4em 0 .6em;font-weight:800}
+.hero p{color:#c9cfd9;margin:.6em 0}.hero code{background:rgba(255,255,255,.12);color:#fff}
+.hero .big{font-size:4.2rem;font-weight:900;color:#ff6b62;line-height:1}
+.hero .bigline{display:flex;align-items:flex-end;gap:16px;margin:28px 0 8px}.hero .bigline span{color:#c9cfd9;padding-bottom:8px}
+h2{font-size:1.65rem;margin:88px 0 10px;line-height:1.4}
+.kicker{color:var(--p0);font-weight:700;letter-spacing:.08em;font-size:.82rem;margin-top:88px}
+.kicker+h2{margin-top:4px}
+.prose p{margin:.8em 0}
+.track{position:sticky;top:0;z-index:5;background:rgba(251,250,247,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);margin:0 -22px;padding:10px 22px;display:flex;gap:6px;overflow-x:auto}
+.stop{flex:1;min-width:84px;border:1px solid var(--line);border-radius:8px;padding:4px 8px;background:#fff;color:var(--ink);font-size:.85rem;display:flex;flex-direction:column;align-items:center}
+.stop:hover{border-color:var(--acc);text-decoration:none}.stop span{display:flex;gap:3px;margin-top:2px}
+.stop i{width:9px;height:9px;border-radius:50%;display:inline-block}i.P0{background:var(--p0)}i.P1{background:var(--p1)}i.P2{background:var(--p2)}
+.chapter{margin-top:56px}
+.ch-head{display:flex;gap:14px;align-items:center;margin-bottom:6px}
+.ch-no{width:42px;height:42px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;font-weight:800;flex:none}
+.ch-head h3{margin:0;font-size:1.3rem}.ch-head code{background:none;padding:0;color:var(--mute)}
+.issue{border-left:3px solid var(--p2);padding:4px 0 4px 22px;margin:30px 0 30px 20px}
+.issue.P0{border-left-color:var(--p0)}.issue.P1{border-left-color:var(--p1)}
+.tag{display:flex;gap:8px;align-items:center}.sev{font-size:.74rem;font-weight:800;color:#fff;background:var(--p2);border-radius:4px;padding:0 7px}
+.P0 .sev{background:var(--p0)}.P1 .sev{background:var(--p1)}.num{color:var(--mute);font-weight:700}
+.issue h4{font-size:1.12rem;margin:.2em 0 .4em}
+.issue p{margin:.55em 0}.cost,.fix{padding-left:62px;position:relative}
+.cost span,.fix span{position:absolute;left:0;top:.15em;font-size:.76rem;font-weight:800;border-radius:4px;padding:1px 8px}
+.cost span{background:#fbe4e2;color:var(--p0)}.fix span{background:#dcf3e2;color:var(--ok)}
+figure{margin:14px 0}
+pre.code{background:#f6f8fa;color:#1f2328;border:1px solid var(--line);padding:14px 16px;border-radius:8px;overflow-x:auto;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;margin:.5em 0}
+pre.diff .add{background:#dafbe1;color:#116329;display:block}pre.diff .del{background:#ffebe9;color:#82071e;display:block}pre.diff .hunk{color:#8250df;background:#f3f0ff;display:block}
+pre.mermaid{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;text-align:center}
+details{margin-top:8px}summary{cursor:pointer;color:var(--acc);font-size:.92rem}
+.scoreboard{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:22px 0}
+.score{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}.score b{display:block;font-size:1.7rem;color:var(--p0);line-height:1.3}
+.score span{color:var(--mute);font-size:.92rem}
+.causes{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:18px 0}
+.cause{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}.cause h4{margin:0 0 4px}.cause p{margin:0;color:var(--mute);font-size:.95rem}
+.cause a{font-size:.82rem;margin-right:6px}
+.road{list-style:none;padding:0;counter-reset:r}.road li{counter-increment:r;position:relative;padding:12px 0 12px 56px;border-left:2px dashed var(--line);margin-left:18px}
+.road li::before{content:counter(r);position:absolute;left:-19px;top:10px;width:36px;height:36px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;font-weight:800}
+.verdict{background:#14181f;color:#f4f1ea;border-radius:14px;padding:26px 28px;margin-top:24px}.verdict strong{color:#ff6b62;font-size:1.3rem}
+footer{color:var(--mute);font-size:.85rem;margin-top:56px}
+@media (max-width:720px){body{font-size:16px}.hero h1{font-size:1.7rem}.hero .big{font-size:3rem}.scoreboard,.causes{grid-template-columns:1fr}.issue{margin-left:4px;padding-left:14px}.cost,.fix{padding-left:0}.cost span,.fix span{position:static;margin-right:6px}}
+</style>
+<script type="module">import m from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";m.initialize({startOnLoad:true,theme:"neutral"});</script>
+</head><body>
+<header class="hero"><div class="in">
+<small>PART B · 程式碼審查</small>
+<h1>buggy_pipeline.py 部署前審查</h1>
+<p>審查對象是一支由 AI Coding Agent 生成、宣稱已通過測試的 PySpark 每日訂單管線：將增量訂單整理成 <code>fact_order</code>，並以 SCD2 維護 <code>dim_member</code>。以下依資料在管線中經過的順序說明每個問題，影響筆數以題目附的 CSV 計算（主要是 day1）。</p>
+<div class="bigline"><div class="big">66.5%</div><span>day1 訂單在換算台幣時被丟掉（3,069 / 4,615 筆，#4）</span></div>
+</div></header>
+<main>
+<nav class="track"><a href="#c0" class="stop"><b>讀檔</b><span><i class=P2></i></span></a><a href="#c1" class="stop"><b>清理</b><span><i class=P0></i><i class=P1></i></span></a><a href="#c2" class="stop"><b>換匯</b><span><i class=P0></i><i class=P2></i></span></a><a href="#c3" class="stop"><b>會員</b><span><i class=P0></i></span></a><a href="#c4" class="stop"><b>組表</b><span><i class=P0></i><i class=P1></i></span></a><a href="#c5" class="stop"><b>寫入</b><span><i class=P0></i><i class=P1></i></span></a><a href="#c6" class="stop"><b>main</b><span><i class=P1></i></span></a></nav>
+
+<div class="prose">
+<p class="kicker">結論</p>
+<h2>不可部署：11 個問題，其中 5 個 P0</h2>
+<p>主要問題是 TWD 訂單在換匯時被丟掉（#4）、dim_member 每次執行被覆寫成只剩有變更的會員（#6）、事實表以 append 寫入導致重跑重複（#9）。程式內建的驗證只印筆數，沒有斷言，上述問題在執行時都不會被發現。</p>
+<p>嚴重度：P0 資料錯誤或遺失；P1 特定情境出錯，或讓問題無法被發現；P2 效能或可維護性。上方列的紅、黃、灰點分別代表 P0、P1、P2。</p>
+</div>
+
+<section class="chapter" id="c0">
+  <div class="ch-head"><span class="ch-no">1</span><div><h3>步驟 1　讀取來源檔</h3><code>load_sources</code></div></div>
+  
+<article class="issue P2" id="i1">
+  <div class="tag"><span class="sev">P2</span><span class="num">#1</span></div>
+  <h4>CSV 不指定 schema</h4>
+  <p class="what"><code>load_sources</code> 讀四個 CSV 時沒有給 schema，所有欄位都是字串，例如金額是 <code>"13100.0"</code>。後面的比較與運算都依賴隱式轉型。</p>
+  <figure><pre class="code text">amount 字串（示意）   ANSI 關：cast 成 int 再比 &gt; 0     ANSI 開：cast 成 bigint 再比 &gt; 0
+&quot;100&quot;               100   → 保留                     100 → 保留
+&quot;13100.0&quot;           13100 → 保留                     CAST_INVALID_INPUT，管線失敗
+&quot;0.5&quot;               0     → 靜默丟掉                  CAST_INVALID_INPUT，管線失敗
+&quot;1,200&quot;             null  → 靜默丟掉                  CAST_INVALID_INPUT，管線失敗</pre></figure>
+  <p class="cost"><span>影響</span>結果取決於 ANSI 設定。ANSI 關閉（Fabric 的 Spark 3.x runtime）時，目前資料不受影響，但上游格式改變就會靜默丟單；ANSI 開啟（Spark 4 預設）時，三個增量檔的金額都帶小數點，管線直接失敗。</p>
+  <p class="fix"><span>修法</span>明確定義 schema 並設定 FAILFAST；<code>enforceSchema</code> 設為 false，表頭與 schema 不一致時報錯。</p>
+  <details><summary>看修正程式碼（對照原碼的 diff）</summary><pre class="code diff"><span class="del">-from pyspark.sql.types import DoubleType</span>
+<span class="add">+from pyspark.sql.types import (DateType, DecimalType, IntegerType, StringType,  # DoubleType 隨 #5 拿掉</span>
+<span class="add">+                               StructField, StructType)</span>
+<span class="hunk">@@</span>
+<span class="add">+ORDER_SCHEMA = StructType([</span>
+<span class="add">+    StructField(&quot;order_id&quot;, StringType()), StructField(&quot;member_id&quot;, StringType()),</span>
+<span class="add">+    StructField(&quot;product_id&quot;, StringType()), StructField(&quot;channel&quot;, StringType()),</span>
+<span class="add">+    StructField(&quot;order_status&quot;, StringType()), StructField(&quot;quantity&quot;, IntegerType()),</span>
+<span class="add">+    StructField(&quot;currency&quot;, StringType()), StructField(&quot;amount&quot;, DecimalType(18, 2)),</span>
+<span class="add">+    StructField(&quot;coupon_discount&quot;, DecimalType(18, 2)),</span>
+<span class="add">+    StructField(&quot;order_created_at&quot;, StringType()),  # 時間欄位轉型要一併處理 +08:00 時區，另案</span>
+<span class="add">+    StructField(&quot;departure_date&quot;, DateType()), StructField(&quot;updated_at&quot;, StringType()),</span>
+<span class="add">+])</span>
+<span class="add">+</span>
+ def load_sources(batch_date: str):
+     &quot;&quot;&quot;讀取當日增量與相關主檔。&quot;&quot;&quot;
+<span class="del">-    orders_inc = spark.read.option(&quot;header&quot;, True).csv(</span>
+<span class="add">+    orders_inc = (</span>
+<span class="add">+        spark.read.option(&quot;header&quot;, True).option(&quot;mode&quot;, &quot;FAILFAST&quot;).option(&quot;enforceSchema&quot;, False)</span>
+<span class="add">+        .schema(ORDER_SCHEMA).csv(</span>
+         f&quot;{LAKEHOUSE}/landing/orders_incremental_{batch_date}.csv&quot;
+<span class="del">-    )</span>
+<span class="add">+    ))</span></pre></details>
+</article>
+</section><section class="chapter" id="c1">
+  <div class="ch-head"><span class="ch-no">2</span><div><h3>步驟 2　清理訂單</h3><code>clean_orders</code></div></div>
+  
+<article class="issue P0" id="i2">
+  <div class="tag"><span class="sev">P0</span><span class="num">#2</span></div>
+  <h4>去重保留的是任意一筆，不是最新狀態</h4>
+  <p class="what"><code>clean_orders</code> 先用 <code>dropDuplicates</code> 去重，保留哪一列不確定；之後的 window 只會排到一列，沒有作用。依官方 README 的語意，排序鍵應該是 <code>updated_at</code>，不是 <code>order_created_at</code>。</p>
+  <figure><pre class="code text">增量檔（示意）
+order_id  order_status  order_created_at  updated_at
+O1        paid          07-01 10:00       07-01 18:30:05
+O1        paid          07-01 10:00       07-01 18:30:12   ← 應保留（updated_at 最新）
+
+dropDuplicates([&quot;order_id&quot;])          →  O1 只剩任意一列，可能是 18:30:05 那列
+row_number() 依 order_created_at 排序  →  只剩一列可排，rn 一定是 1
+就算不先去重                           →  兩列 order_created_at 相同，排序分不出新舊</pre></figure>
+  <p class="cost"><span>影響</span>day1 有 18 個 order_id 重複，保留的版本不確定，重跑結果可能不同。其中 3 組的金額與會員也不同，需要向上游確認是否為不同訂單。</p>
+  <p class="fix"><span>修法</span>移除 <code>dropDuplicates</code>，以 window 依 <code>updated_at</code> 由新到舊取第一列；主要欄位不一致的 3 組，上游確認前先隔離。</p>
+  <details><summary>看修正程式碼（對照原碼的 diff）</summary><pre class="code diff">     &quot;&quot;&quot;去除重複訂單並保留最新狀態。&quot;&quot;&quot;
+<span class="del">-    # 去除重複的 order_id，確保唯一性</span>
+<span class="del">-    deduped = orders_inc.dropDuplicates([&quot;order_id&quot;])</span>
+<span class="del">-</span>
+     # 取每張訂單的最新狀態
+<span class="del">-    w = Window.partitionBy(&quot;order_id&quot;).orderBy(F.col(&quot;order_created_at&quot;).desc())</span>
+<span class="add">+    w = Window.partitionBy(&quot;order_id&quot;).orderBy(F.col(&quot;updated_at&quot;).desc())</span>
+     latest = (
+<span class="del">-        deduped.withColumn(&quot;rn&quot;, F.row_number().over(w))</span>
+<span class="add">+        orders_inc.withColumn(&quot;rn&quot;, F.row_number().over(w))</span>
+         .filter(F.col(&quot;rn&quot;) == 1)
+         .drop(&quot;rn&quot;)
+     )</pre></details>
+</article>
+<article class="issue P1" id="i3">
+  <div class="tag"><span class="sev">P1</span><span class="num">#3</span></div>
+  <h4><code>filter(F.col(&quot;amount&quot;) &gt; 0)</code> 靜默丟掉 0 元和負數訂單</h4>
+  <p class="what"><code>filter(amount &gt; 0)</code> 直接移除金額 ≤ 0 的訂單，沒有計數或告警。</p>
+  <figure><pre class="code text">訂單（示意）            現況 filter(amount &gt; 0)      修正後
+O1  amount   1200.0  →  保留                        保留
+O2  amount  -1200.0  →  丟掉，沒有任何紀錄          隔離＋告警 → 開卡追上游
+                        下游看不出少了一筆          隔離表留下證據，修好後可補回</pre></figure>
+  <p class="cost"><span>影響</span>增量檔目前沒有這類資料；<code>orders_base</code> 有 50 筆負數，看起來是正負號錯誤（未查證）。若增量檔出現，這些訂單會被丟掉且不會被發現。</p>
+  <p class="fix"><span>修法</span>把 <code>amount &gt; 0</code> 定為資料契約，違反的列送隔離表並告警，再追查上游原因。</p>
+  <details><summary>看修正程式碼（對照原碼的 diff）</summary><pre class="code diff"><span class="add">+QUARANTINE = {}  # 隔離原因 -&gt; 被排除的列；main 計數、寫入隔離表並告警（#3、#4、#8 共用）</span>
+<span class="add">+</span>
+ # ---------------------------------------------------------------------------
+ # Step 2. 訂單清洗與去重（確保資料品質）
+<span class="hunk">@@</span>
+     # 過濾無效金額，保持資料乾淨
+<span class="del">-    latest = latest.filter(F.col(&quot;amount&quot;) &gt; 0)</span>
+<span class="add">+    invalid = F.col(&quot;amount&quot;).isNull() | (F.col(&quot;amount&quot;) &lt;= 0)   # 契約：amount &gt; 0；違反就隔離、告警、開卡追上游</span>
+<span class="add">+    QUARANTINE[&quot;invalid_amount&quot;] = latest.filter(invalid)</span>
+<span class="add">+    latest = latest.filter(~invalid)          # 隔離列從主流程拿掉，對帳時才不會重複計算</span></pre></details>
+</article>
+</section><section class="chapter" id="c2">
+  <div class="ch-head"><span class="ch-no">3</span><div><h3>步驟 3　換算台幣</h3><code>convert_currency</code></div></div>
+  
+<article class="issue P0" id="i4">
+  <div class="tag"><span class="sev">P0</span><span class="num">#4</span></div>
+  <h4>匯率 inner join 丟掉全部 TWD 訂單</h4>
+  <p class="what"><code>convert_currency</code> 用 inner join 對匯率，但匯率表只有 USD、JPY，TWD 訂單對不到匯率而被丟掉。</p>
+  <figure><pre class="code text">orders（示意）            fx_rates（2026-04-28）     inner join 結果
+O1  TWD  1000  ── ✗ ──  （沒有 TWD）           →  消失
+O2  USD    50  ───────  USD  31.403            →  O2  1570.15
+O3  JPY  9000  ───────  JPY  0.20486           →  O3  1843.74</pre></figure>
+  <p class="cost"><span>影響</span>day1 的 4,615 筆中，3,069 筆（66.5%）是 TWD，全部遺失，且沒有錯誤訊息。</p>
+  <p class="fix"><span>修法</span>改用 left join，TWD 匯率固定為 1；對不到匯率的外幣訂單送隔離表。乘法改用內建運算（同 #5）。</p>
+  <details><summary>看修正程式碼（對照原碼的 diff）</summary><pre class="code diff">     joined = orders.join(
+         fx,
+         (orders[&quot;currency&quot;] == fx[&quot;currency&quot;]) &amp; (orders[&quot;order_date&quot;] == fx[&quot;rate_date&quot;]),
+<span class="del">-        &quot;inner&quot;,</span>
+<span class="add">+        &quot;left&quot;,</span>
+     )
+<span class="del">-    converted = joined.withColumn(&quot;amount_twd&quot;, to_twd_udf(F.col(&quot;amount&quot;), F.col(&quot;rate_to_twd&quot;)))</span>
+<span class="add">+    fx_rate = fx[&quot;rate_to_twd&quot;].cast(&quot;decimal(18,6)&quot;)   # 先 cast 再進 when：字串和數字混在 when 裡，ANSI 下會被轉成 bigint 而報錯</span>
+<span class="add">+    rate = F.when(orders[&quot;currency&quot;] == &quot;TWD&quot;, F.lit(1).cast(&quot;decimal(18,6)&quot;)).otherwise(fx_rate)</span>
+<span class="add">+    converted = joined.withColumn(&quot;amount_twd&quot;, F.col(&quot;amount&quot;).cast(&quot;decimal(18,2)&quot;) * rate)</span>
+<span class="add">+    no_fx = F.col(&quot;amount_twd&quot;).isNull()</span>
+<span class="add">+    QUARANTINE[&quot;missing_fx&quot;] = converted.filter(no_fx)   # 寫入隔離表並告警</span>
+<span class="add">+    converted = converted.filter(~no_fx)</span>
+     return converted</pre></details>
+</article>
+<article class="issue P2" id="i5">
+  <div class="tag"><span class="sev">P2</span><span class="num">#5</span></div>
+  <h4>Python UDF 做乘法</h4>
+  <p class="what">乘法用 Python UDF 實作，每一列都要在 JVM 與 Python 之間序列化。UDF 也把缺值當成 0。</p>
+  <figure><pre class="code text">UDF 每一列的路徑：JVM ──序列化──▶ Python worker 執行 to_twd() ──序列化──▶ JVM
+
+amount（示意）  rate_to_twd   to_twd_udf 結果       內建乘法結果
+100.0          31.403        3140.3               3140.3
+null           31.403        0.0  ← 缺值變 0 元    null（交給品質檢查）</pre></figure>
+  <p class="cost"><span>影響</span>資料量大時效能明顯下降；缺值的金額被當成 0 元加總，報表看起來正常。</p>
+  <p class="fix"><span>修法</span>移除 UDF，改用內建乘法，兩邊轉成 decimal。</p>
+  <details><summary>看修正程式碼（對照原碼的 diff）</summary><pre class="code diff">     &quot;&quot;&quot;將各幣別金額換算為新台幣。&quot;&quot;&quot;
+<span class="del">-</span>
+<span class="del">-    def to_twd(amount, rate):</span>
+<span class="del">-        if amount is None:</span>
+<span class="del">-            return 0.0</span>
+<span class="del">-        return float(amount) * float(rate)</span>
+<span class="del">-</span>
+<span class="del">-    to_twd_udf = F.udf(to_twd, DoubleType())</span>
+ 
+     joined = orders.join(</pre></details>
+</article>
+</section><section class="chapter" id="c3">
+  <div class="ch-head"><span class="ch-no">4</span><div><h3>步驟 4　更新會員維度表</h3><code>update_dim_member</code></div></div>
+  
+<article class="issue P0" id="i6">
+  <div class="tag"><span class="sev">P0</span><span class="num">#6</span></div>
+  <h4>SCD2 實作錯誤：覆寫整張表、沒關舊版、新會員進不來</h4>
+  <p class="what"><code>update_dim_member</code> 沒有 <code>valid_to</code>、<code>is_current</code>，不關閉舊版，新會員也不會寫入。寫入用 <code>overwrite</code> 搭配涵蓋所有列的 <code>replaceWhere</code>，結果是整張表被換成「本批有變更的會員」。</p>
+  <figure><pre class="code text">dim_member 執行前（示意）      members 最新快照（示意）
+M001  銀卡  台北市             M001  金卡  台北市   ← 升等
+M002  金卡  台中市             M002  金卡  台中市   （沒變）
+                               M003  銀卡  高雄市   ← 新會員
+
+changed = dim inner join 快照，只留屬性不同的列  →  只有 M001
+overwrite + replaceWhere &quot;member_id IS NOT NULL&quot;  →  整張表換成 changed
+
+dim_member 執行後
+M001  金卡  台北市  valid_from=2026-05-31     ← 銀卡那一版沒了；M002 被刪；M003 沒進來</pre><pre class="code text">修正後應有的 dim_member（示意）
+member_id  level  city    valid_from  valid_to    is_current
+M001       銀卡   台北市  2026-04-30  2026-05-31  false   ← 關閉舊版
+M001       金卡   台北市  2026-05-31  9999-12-31  true    ← 插入新版
+M002       金卡   台中市  2026-04-30  9999-12-31  true    ← 沒變，不動
+M003       銀卡   高雄市  2026-05-31  9999-12-31  true    ← 新會員</pre></figure>
+  <p class="cost"><span>影響</span>每次執行後，dim_member 只剩本批有變更的會員；沒有變更時幾乎清空。406 位跨快照日等級變過的會員，舊等級不會保留。</p>
+  <p class="fix"><span>修法</span>改用 Delta MERGE：關閉有變更的目前版本，再插入新版本與新會員；比較用 null-safe 的 <code>&lt;=&gt;</code>；同日矛盾的快照先隔離。</p>
+  <details><summary>看修正程式碼（對照原碼的 diff）</summary><pre class="code diff">     dim = spark.read.format(&quot;delta&quot;).load(f&quot;{LAKEHOUSE}/dim/dim_member&quot;)
+ 
+<span class="del">-    latest_snap = members.withColumn(</span>
+<span class="del">-        &quot;rn&quot;,</span>
+<span class="del">-        F.row_number().over(</span>
+<span class="del">-            Window.partitionBy(&quot;member_id&quot;).orderBy(F.col(&quot;extract_date&quot;).desc())</span>
+<span class="del">-        ),</span>
+<span class="del">-    ).filter(F.col(&quot;rn&quot;) == 1)</span>
+<span class="del">-</span>
+<span class="del">-    # 偵測屬性變更的會員，更新其最新屬性並蓋上新的生效日</span>
+<span class="del">-    changed = dim.alias(&quot;d&quot;).join(latest_snap.alias(&quot;s&quot;), &quot;member_id&quot;).filter(</span>
+<span class="del">-        (F.col(&quot;d.member_level&quot;) != F.col(&quot;s.member_level&quot;))</span>
+<span class="del">-        | (F.col(&quot;d.city&quot;) != F.col(&quot;s.city&quot;))</span>
+<span class="del">-    )</span>
+<span class="del">-</span>
+<span class="del">-    updated = (</span>
+<span class="del">-        changed.select(</span>
+<span class="del">-            &quot;member_id&quot;,</span>
+<span class="del">-            F.col(&quot;s.member_name&quot;).alias(&quot;member_name&quot;),</span>
+<span class="del">-            F.col(&quot;s.member_level&quot;).alias(&quot;member_level&quot;),</span>
+<span class="del">-            F.col(&quot;s.city&quot;).alias(&quot;city&quot;),</span>
+<span class="del">-            F.col(&quot;s.extract_date&quot;).alias(&quot;valid_from&quot;),</span>
+<span class="del">-        )</span>
+<span class="del">-    )</span>
+<span class="del">-</span>
+<span class="del">-    # 直接覆寫變更會員的維度紀錄（SCD2 版本管理）</span>
+<span class="del">-    updated.write.format(&quot;delta&quot;).mode(&quot;overwrite&quot;).option(</span>
+<span class="del">-        &quot;replaceWhere&quot;, &quot;member_id IS NOT NULL&quot;</span>
+<span class="del">-    ).save(f&quot;{LAKEHOUSE}/dim/dim_member&quot;)</span>
+<span class="add">+    # 換成下方「修正後」整段：取最新快照（同分隔離）→ 只跟目前版本比的 chg → MERGE 關閉舊版＋插入新版</span>
+ 
+     return spark.read.format(&quot;delta&quot;).load(f&quot;{LAKEHOUSE}/dim/dim_member&quot;)</pre><pre class="code python">w_m = Window.partitionBy(&quot;member_id&quot;)
+top = (members.withColumn(&quot;max_dt&quot;, F.max(&quot;extract_date&quot;).over(w_m))
+       .filter(F.col(&quot;extract_date&quot;) == F.col(&quot;max_dt&quot;))
+       .withColumn(&quot;n&quot;, F.count(&quot;*&quot;).over(w_m)))
+ambiguous = top.filter(&quot;n &gt; 1&quot;)   # 最新快照同分：寫入隔離表並告警
+latest_snap = top.filter(&quot;n = 1&quot;).drop(&quot;max_dt&quot;, &quot;n&quot;)
+
+cur = dim.filter(&quot;is_current&quot;)
+chg = (latest_snap.alias(&quot;s&quot;).join(cur.alias(&quot;d&quot;), &quot;member_id&quot;, &quot;left&quot;)
+       .filter(F.col(&quot;d.member_id&quot;).isNull()
+               | ~F.col(&quot;s.member_level&quot;).eqNullSafe(F.col(&quot;d.member_level&quot;))
+               | ~F.col(&quot;s.city&quot;).eqNullSafe(F.col(&quot;d.city&quot;))))
+# 以下兩步為示意（非可執行程式）：
+# 1) MERGE：對 chg 中已存在的會員，把目前版本的 valid_to 設為 s.extract_date、is_current 設為 false
+# 2) INSERT：chg 全部插入新版本，valid_from=extract_date、valid_to=&#x27;9999-12-31&#x27;、is_current=true
+# 有效期間為半開區間 [valid_from, valid_to)：舊版 valid_to 與新版 valid_from 同一天也不重疊（#7 的 join 條件同此）</pre></details>
+</article>
+</section><section class="chapter" id="c4">
+  <div class="ch-head"><span class="ch-no">5</span><div><h3>步驟 5　組出事實表</h3><code>build_fact</code></div></div>
+  
+<article class="issue P0" id="i7">
+  <div class="tag"><span class="sev">P0</span><span class="num">#7</span></div>
+  <h4>事實表 join 的是原始 members 快照，不是維度表</h4>
+  <p class="what"><code>main()</code> 沒有使用 <code>update_dim_member</code> 的回傳值，<code>build_fact</code> join 的是原始會員快照。同一會員有 2～3 筆快照，join 後一張訂單變成多列。</p>
+  <figure><pre class="code text">main()
+├─ dim_member = update_dim_member(members)          ← 回傳值沒再用到
+└─ fact = build_fact(converted, members, products)  ← 傳的是原始快照
+     └─ converted.join(members, &quot;member_id&quot;, &quot;left&quot;)</pre><pre class="code text">members.csv（示意）                      訂單（示意）
+M001  銀卡  extract_date=2026-04-30      O1  M001  order_date=2026-07-01  amount_twd=1000
+M001  金卡  extract_date=2026-05-31
+
+join 結果
+O1  M001  1000  銀卡
+O1  M001  1000  金卡    ← 同一張訂單兩列，營收算成 2000，等級也同時有新舊兩個</pre></figure>
+  <p class="cost"><span>影響</span>營收重複計算。以 day1 原始增量計算，join 後多出 571 列（依 #2、#4 是否已修，介於 182～571 列）；訂單也會同時帶到新舊兩個等級。</p>
+  <p class="fix"><span>修法</span>改 join 修正後的 dim_member，以下單日期落在版本有效期間內配對（point-in-time join）。</p>
+  <details><summary>看修正程式碼（對照原碼的 diff）</summary><pre class="code diff"><span class="del">-def build_fact(converted, members, products):</span>
+<span class="add">+def build_fact(converted, dim_member, products):</span>
+     &quot;&quot;&quot;關聯維度並寫入事實表。&quot;&quot;&quot;
+     # 關聯會員維度取得會員屬性
+<span class="del">-    with_member = converted.join(members, &quot;member_id&quot;, &quot;left&quot;)</span>
+<span class="add">+    d = dim_member.alias(&quot;d&quot;)</span>
+<span class="add">+    with_member = converted.alias(&quot;o&quot;).join(</span>
+<span class="add">+        d,</span>
+<span class="add">+        (F.col(&quot;o.member_id&quot;) == F.col(&quot;d.member_id&quot;))</span>
+<span class="add">+        &amp; (F.col(&quot;d.valid_from&quot;) &lt;= F.col(&quot;o.order_date&quot;))</span>
+<span class="add">+        &amp; (F.col(&quot;o.order_date&quot;) &lt; F.col(&quot;d.valid_to&quot;)),   # 半開區間</span>
+<span class="add">+        &quot;left&quot;,</span>
+<span class="add">+    ).drop(d[&quot;member_id&quot;])</span></pre><pre class="code diff">     dim_member = update_dim_member(members)
+<span class="del">-    fact = build_fact(converted, members, products)</span>
+<span class="add">+    fact = build_fact(converted, dim_member, products)</span></pre></details>
+</article>
+<article class="issue P1" id="i8">
+  <div class="tag"><span class="sev">P1</span><span class="num">#8</span></div>
+  <h4>產品 inner join 靜默丟單</h4>
+  <p class="what">產品用 inner join，主檔中找不到的產品，訂單會被丟掉。</p>
+  <figure><pre class="code text">訂單（示意）          products（示意）               inner join 結果
+O1  P001  ───────   P001  東京5日                →  O1 保留
+O2  P999  ── ✗ ──   （P999 已下架或主檔還沒更新）  →  消失，沒有告警</pre></figure>
+  <p class="cost"><span>影響</span>目前三個增量檔的產品都對得到；商品下架或主檔延遲更新時會漏單。</p>
+  <p class="fix"><span>修法</span>改用 left join，找不到產品的訂單送隔離表並告警。</p>
+  <details><summary>看修正程式碼（對照原碼的 diff）</summary><pre class="code diff">     # 關聯產品維度
+<span class="del">-    with_product = with_member.join(products, &quot;product_id&quot;, &quot;inner&quot;)</span>
+<span class="add">+    p = products.withColumn(&quot;product_found&quot;, F.lit(True))</span>
+<span class="add">+    with_product = with_member.join(p, &quot;product_id&quot;, &quot;left&quot;)</span>
+<span class="add">+    QUARANTINE[&quot;unknown_product&quot;] = with_product.filter(F.col(&quot;product_found&quot;).isNull())  # 計數並告警</span>
+<span class="add">+    with_product = with_product.filter(F.col(&quot;product_found&quot;).isNotNull())</span></pre></details>
+</article>
+</section><section class="chapter" id="c5">
+  <div class="ch-head"><span class="ch-no">6</span><div><h3>步驟 6　寫入與驗證</h3><code>write_fact</code></div></div>
+  
+<article class="issue P0" id="i9">
+  <div class="tag"><span class="sev">P0</span><span class="num">#9</span></div>
+  <h4>事實表用 append：重跑會重複，跨日訂單更新也會重複</h4>
+  <p class="what"><code>write_fact</code> 用 <code>mode("append")</code> 寫入，沒有依 <code>order_id</code> upsert。</p>
+  <figure><pre class="code text">重跑（示意）                              fact_order
+第 1 次 main(&quot;day1&quot;)  → append  →  O1  2026-07-01  1000
+第 2 次 main(&quot;day1&quot;)  → append  →  O1  2026-07-01  1000
+                                   O1  2026-07-01  1000   ← 重複，營收算成 2000
+
+訂單更新（示意，若照官方語意）
+fact_order 既有  O2  paid       order_date=2026-06-20  500
+day1 增量        O2  completed  order_date=2026-07-01  500
+append 後        兩列並存，分區不同，營收算成 1000；MERGE 後只剩 completed 那列，500</pre></figure>
+  <p class="cost"><span>影響</span>同一批重跑一次，金額翻倍。day1 另有 603 列的 order_id 已存在於 <code>orders_base</code>；若照官方語意是同一訂單的新狀態，新舊兩列會並存（需向上游確認）。</p>
+  <p class="fix"><span>修法</span>以 <code>order_id</code> 做 Delta MERGE，來源較新才更新。需先修 #2、#7，否則同一 order_id 會有多列。</p>
+  <details><summary>看修正程式碼（對照原碼的 diff）</summary><pre class="code diff">     fact = with_product.select(
+         &quot;order_id&quot;,
+<span class="add">+        &quot;updated_at&quot;,   # MERGE 判斷新舊要用</span>
+<span class="hunk">@@</span>
+<span class="del">-    fact.write.format(&quot;delta&quot;).mode(&quot;append&quot;).partitionBy(&quot;order_date&quot;).save(</span>
+<span class="del">-        f&quot;{LAKEHOUSE}/fact/fact_order&quot;</span>
+<span class="del">-    )</span>
+<span class="add">+    from delta.tables import DeltaTable</span>
+<span class="add">+    path = f&quot;{LAKEHOUSE}/fact/fact_order&quot;</span>
+<span class="add">+    if not DeltaTable.isDeltaTable(spark, path):   # 第一次執行：表不存在就直接建立</span>
+<span class="add">+        fact.write.format(&quot;delta&quot;).partitionBy(&quot;order_date&quot;).save(path)</span>
+<span class="add">+    else:</span>
+<span class="add">+        (DeltaTable.forPath(spark, path).alias(&quot;t&quot;).merge(fact.alias(&quot;s&quot;), &quot;t.order_id = s.order_id&quot;)</span>
+<span class="add">+            .whenMatchedUpdateAll(condition=&quot;s.updated_at &gt; t.updated_at&quot;)</span>
+<span class="add">+            .whenNotMatchedInsertAll()</span>
+<span class="add">+            .execute())</span></pre></details>
+</article>
+<article class="issue P1" id="i10">
+  <div class="tag"><span class="sev">P1</span><span class="num">#10</span></div>
+  <h4>「驗證」沒有任何斷言，還把整張事實表 collect 到 driver</h4>
+  <p class="what">寫入後把整張事實表 <code>collect()</code> 到 driver，用迴圈計數後只 <code>print</code>，沒有斷言；<code>main()</code> 最後無條件印出「資料品質已確保」。</p>
+  <figure><pre class="code text">write_fact(fact)
+├─ load(&quot;.../fact/fact_order&quot;).collect()   ← 所有日期的資料搬進 driver 記憶體
+├─ for row in all_rows: counts[...] += 1   ← Python 迴圈逐列計數
+└─ print(f&quot;... 寫入完成，共 ... 筆&quot;)        ← 只印，不比對、不 raise
+main()
+└─ print(&quot;... 資料品質已確保。&quot;)            ← 無條件執行</pre></figure>
+  <p class="cost"><span>影響</span>前述 P0 造成的丟單、重複與 dim 覆寫，都不會被這段驗證發現。</p>
+  <p class="fix"><span>修法</span>在寫入前對帳：輸入 = 寫入 + 隔離、order_id 唯一、<code>amount_twd</code> 非 null，不通過就中止。</p>
+  <details><summary>看修正程式碼（對照原碼的 diff）</summary><pre class="code diff"><span class="del">-def write_fact(fact):</span>
+<span class="add">+def write_fact(fact, n_input, n_quarantined):</span>
+     &quot;&quot;&quot;寫入事實表並驗證筆數。&quot;&quot;&quot;
+<span class="add">+    # 寫入前對帳：不通過就 raise，這批資料不會進 fact_order</span>
+<span class="add">+    fact = fact.persist()   # 對帳與寫入共用同一份結果，避免 lineage 重算</span>
+<span class="add">+    n_fact = fact.count()</span>
+<span class="add">+    errors = []</span>
+<span class="add">+    if n_input != n_fact + n_quarantined:</span>
+<span class="add">+        errors.append(f&quot;輸入 {n_input} != 寫入 {n_fact} + 隔離 {n_quarantined}&quot;)</span>
+<span class="add">+    if fact.groupBy(&quot;order_id&quot;).count().filter(&quot;count &gt; 1&quot;).limit(1).count() &gt; 0:</span>
+<span class="add">+        errors.append(&quot;order_id 不唯一&quot;)</span>
+<span class="add">+    if fact.filter(F.col(&quot;amount_twd&quot;).isNull()).limit(1).count() &gt; 0:</span>
+<span class="add">+        errors.append(&quot;amount_twd 有 null&quot;)</span>
+<span class="add">+    if errors:</span>
+<span class="add">+        raise ValueError(f&quot;fact_order 寫入前驗證失敗：{errors}&quot;)</span>
+     fact.write.format(&quot;delta&quot;).mode(&quot;append&quot;).partitionBy(&quot;order_date&quot;).save(
+         f&quot;{LAKEHOUSE}/fact/fact_order&quot;
+     )
+ 
+<span class="del">-    # 驗證：確認每日各分區筆數正確</span>
+<span class="del">-    all_rows = spark.read.format(&quot;delta&quot;).load(f&quot;{LAKEHOUSE}/fact/fact_order&quot;).collect()</span>
+<span class="del">-    counts = {}</span>
+<span class="del">-    for row in all_rows:</span>
+<span class="del">-        counts[row[&quot;order_date&quot;]] = counts.get(row[&quot;order_date&quot;], 0) + 1</span>
+<span class="del">-    print(f&quot;✅ 寫入完成，共 {len(all_rows)} 筆，分區數 {len(counts)}&quot;)</span>
+<span class="add">+    # 寫入後：資料已 commit，只能告警；在 Spark 端聚合，只看本批次的訂單</span>
+<span class="add">+    tbl = spark.read.format(&quot;delta&quot;).load(f&quot;{LAKEHOUSE}/fact/fact_order&quot;)</span>
+<span class="add">+    batch = tbl.join(fact.select(&quot;order_id&quot;).distinct(), &quot;order_id&quot;, &quot;left_semi&quot;)</span>
+<span class="add">+    batch.groupBy(&quot;order_date&quot;).count().show()</span>
+<span class="add">+    if batch.groupBy(&quot;order_id&quot;).count().filter(&quot;count &gt; 1&quot;).limit(1).count() &gt; 0:</span>
+<span class="add">+        print(&quot;告警：fact_order 裡本批次的 order_id 有重複&quot;)   # 實務上接告警系統</span></pre></details>
+</article>
+</section><section class="chapter" id="c6">
+  <div class="ch-head"><span class="ch-no">M</span><div><h3>main　執行流程</h3><code>main</code></div></div>
+  
+<article class="issue P1" id="i11">
+  <div class="tag"><span class="sev">P1</span><span class="num">#11</span></div>
+  <h4>執行順序與失敗處理</h4>
+  <p class="what">dim 先寫、fact 後寫，不在同一個交易內；<code>batch_date</code> 預設為 <code>"day1"</code>；第一次執行時 dim_member 不存在，程式會失敗。</p>
+  <figure><pre class="mermaid">sequenceDiagram
+    participant M as main()
+    participant D as dim_member
+    participant F as fact_order
+    M-&gt;&gt;D: update_dim_member：overwrite（已提交）
+    M-&gt;&gt;F: build_fact、write_fact
+    F--xM: 失敗
+    Note over D,F: dim 已改、fact 沒寫，兩表不一致
+    M-&gt;&gt;M: 排程重跑時忘了帶參數，main() 用預設 &quot;day1&quot;
+    M-&gt;&gt;F: day1 再 append 一次（#9），重複</pre></figure>
+  <p class="cost"><span>影響</span>fact 寫入失敗時 dim 已被修改；漏帶參數會重跑 day1，搭配 #9 的 append 造成重複。</p>
+  <p class="fix"><span>修法</span><code>batch_date</code> 改為必填並驗證格式；各步驟冪等，失敗時整批重跑；表不存在時先建表並回填歷史。</p>
+  <details><summary>看修正程式碼（對照原碼的 diff）</summary><pre class="code diff"><span class="add">+import re</span>
+<span class="add">+import sys</span>
+<span class="add">+from delta.tables import DeltaTable</span>
+ from pyspark.sql import SparkSession, functions as F, Window
+<span class="hunk">@@</span>
+ def update_dim_member(members):
+     &quot;&quot;&quot;以 SCD Type 2 維護會員維度，保留歷史版本。&quot;&quot;&quot;
+<span class="add">+    if not DeltaTable.isDeltaTable(spark, f&quot;{LAKEHOUSE}/dim/dim_member&quot;):</span>
+<span class="add">+        initial_load_dim_member(members)   # 示意：此函式需自行實作（建空表，再依 extract_date 由舊到新逐日套 #6 的 MERGE），見附錄「SCD2 初始載入」</span>
+     dim = spark.read.format(&quot;delta&quot;).load(f&quot;{LAKEHOUSE}/dim/dim_member&quot;)
+<span class="hunk">@@</span>
+<span class="del">-def main(batch_date: str = &quot;day1&quot;):</span>
+<span class="add">+def main(batch_date: str):</span>
+<span class="add">+    if not re.fullmatch(r&quot;day\d+&quot;, batch_date):   # 依實際檔名規則驗證</span>
+<span class="add">+        raise ValueError(f&quot;batch_date 格式錯誤：{batch_date!r}&quot;)</span>
+     orders_inc, members, products, fx = load_sources(batch_date)
+<span class="add">+    n_input = orders_inc.select(&quot;order_id&quot;).distinct().count()   # 去重後應有的訂單數（#10 對帳用）</span>
+<span class="hunk">@@</span>
+<span class="del">-    write_fact(fact)</span>
+<span class="add">+    n_quarantined = sum(q.count() for q in QUARANTINE.values())   # #3、#4、#8 隔離的列數</span>
+<span class="add">+    write_fact(fact, n_input, n_quarantined)</span>
+<span class="hunk">@@</span>
+ if __name__ == &quot;__main__&quot;:
+<span class="del">-    main()</span>
+<span class="add">+    main(sys.argv[1])</span></pre></details>
+</article>
+</section>
+
+<div class="prose">
+<p class="kicker">影響總結</p>
+<h2>對下游的影響</h2>
+<div class="scoreboard">
+<div class="score"><b>66.5%</b><span>day1 訂單在換匯時遺失（#4）</span></div>
+<div class="score"><b>覆寫</b><span>dim_member 每次只剩本批有變更的會員（#6）</span></div>
+<div class="score"><b>重複</b><span>重跑一次該批金額翻倍（#9）；快照 join 造成一對多（#7）</span></div>
+</div>
+<p>這些問題可以歸成四類共同成因：</p>
+<div class="causes">
+<div class="cause"><h4>對不到就丟</h4><p>inner join 和 filter 直接拿掉不符合的列，沒有隔離也沒有計數。</p><a href="#i3">#3</a><a href="#i4">#4</a><a href="#i8">#8</a></div>
+<div class="cause"><h4>沒守住「一張訂單一列」</h4><p>去重沒取最新、join 到一對多的快照、寫入用 append。</p><a href="#i2">#2</a><a href="#i7">#7</a><a href="#i9">#9</a></div>
+<div class="cause"><h4>SCD2 名不符實</h4><p>沒有版本欄位，寫入時覆寫整張表。</p><a href="#i6">#6</a></div>
+<div class="cause"><h4>假設自己一定成功</h4><p>驗證沒有斷言，寫入順序與參數不考慮失敗。</p><a href="#i10">#10</a><a href="#i11">#11</a></div>
+</div>
+
+<p class="kicker">修正建議</p>
+<h2>修正順序</h2>
+<ol class="road">
+<li><strong>P0：#2、#4、#6、#7、#9。</strong>在現有資料上就會出錯。#2、#7 需先於 #9：MERGE 來源同一 order_id 有多列時，對到既有列會報錯，新訂單則會靜默插入多列（E12）。</li>
+<li><strong>#10、#11。</strong>讓錯誤在寫入前被擋下，失敗後可以整批重跑。</li>
+<li><strong>#3、#8，以及 P2 的 #1、#5。</strong></li>
+</ol>
+<p>對 AI（或工程師）的修改要求：先補能重現問題的測試；所有寫入以業務 key 做 MERGE，重跑結果相同；每個 filter 與 join 都要有隔離與計數；驗證要有斷言；修正後重新審查。</p>
+<p>若已部署到 prod：先停排程、暫停 VACUUM，從 Delta 的乾淨版本或原始檔重建新表，對帳通過後再切換。詳見 <a href="./prod-recovery.md">prod-recovery.md</a>。</p>
+
+<p class="kicker">方法</p>
+<h2>證據來源</h2>
+<p>原管線未執行（題目要求）。影響筆數以 Python 讀取題目 CSV 計算；Spark 與 Delta 語意以本機 pyspark 4.2＋delta-spark 小資料實測；修正 diff 套回程式副本後以 day1 實跑，標示意的兩段以驗證用的補實作代替（E13）。腳本與輸出見 <a href="./evidence.md">evidence.md</a>，方法見 <a href="./appendix.md">appendix.md</a>。</p>
+<p>靜態分析：ruff 只抓到 1 個問題的跡象（F841，<code>dim_member</code> 未使用，對應 #7），mypy 沒有抓到任何一個。</p>
+
+<div class="verdict"><strong>結論：不可部署。</strong><p>order_id 的語意（#2、#9）待上游確認，但不影響結論：#4、#6、#7 在任一解讀下都成立。依上述順序修正、補測試並重新審查後，才能部署。</p></div>
+</div>
+
+<footer>閱讀版。正本是 <a href="./code-review.md">code-review.md</a>；說明文字為精簡改寫，以正本為準。</footer>
+</main></body></html>

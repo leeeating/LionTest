@@ -37,6 +37,74 @@ Type 2 怎麼 join 事實見 [point-in-time-join.md](point-in-time-join.md)；�
 - `register_date`：從註冊起就有一版；但註冊時的屬性是推定，不是觀測到的。
 - 很早的固定日期（如 1900-01-01）：一定對得到；同樣是推定，而且看不出哪段是推定。
 
+## 快照不是也能查「當時」嗎？為什麼還要 SCD2
+**可以。** 每張訂單去找「`extract_date` ≤ 下單日的最新那份快照」（as-of join），一樣查得到當時的等級。SCD2 沒有多出快照沒有的資訊；它是把這段邏輯**事先算好一次**，讓下游不用各自重算。類比：快照像 log，每次問「當時是什麼」都要從 log 算；SCD2 像預先建好的索引。
+
+快照本身的好處：來源系統只要定期照抄、不必懂業務；原始快照不改，下游寫壞了可以重建。代價是它只是原料：
+
+| | 直接查快照（as-of join） | 先整理成 SCD2 |
+|---|---|---|
+| 查詢邏輯 | 每次都要「≤ 下單日的最新一筆」，Spark 裡要 join 後再用 window 排序 | 區間判斷 `valid_from <= t < valid_to`；fact 存 surrogate key 時就是等值 join |
+| 誰寫這段邏輯 | 每個下游各寫一次，寫法不同答案就不同 | 管線寫一次，大家共用 |
+| 同日兩列矛盾 | 每個下游自己處理 | 整理時隔離一次 |
+| 目前值 | 再算一次 | 看 `is_current` |
+| 列數 | 每份快照都存，沒變也存一列 | 只在屬性變時多一列 |
+
+兩者共同的限制：兩次快照之間的變化（例如月中升等又降等）都看不到。資料量小、只有一個人在查時，直接查快照也行；下游一多，就該由管線統一整理。
+
+**最小可跑範例**（DuckDB；`ASOF JOIN` 是 DuckDB 的語法；Spark SQL 沒有這個語法（[join 語法](https://spark.apache.org/docs/latest/sql-ref-syntax-qry-select-join.html)），一般用 join＋window 取代；pandas-on-Spark 另有 [`merge_asof`](https://spark.apache.org/docs/latest/api/python/reference/pyspark.pandas/api/pyspark.pandas.merge_asof.html)（驗收 agent 查證））：
+
+```python
+import duckdb
+
+con = duckdb.connect()
+# 快照（原料）：M001 6/30 沒變也抄了一份
+con.sql("""CREATE TABLE snap AS SELECT * FROM (VALUES
+  ('M001', '銀卡', DATE '2026-04-30'),
+  ('M001', '金卡', DATE '2026-05-31'),
+  ('M001', '金卡', DATE '2026-06-30')
+) t(member_id, member_level, extract_date)""")
+con.sql("""CREATE TABLE orders AS SELECT * FROM (VALUES
+  ('O1', 'M001', DATE '2026-05-10'),
+  ('O2', 'M001', DATE '2026-06-15')
+) t(order_id, member_id, order_date)""")
+
+# 做法一：直接查快照（as-of join：取 extract_date <= order_date 的最新一份）
+print(con.sql("""
+  SELECT o.order_id, s.member_level
+  FROM orders o ASOF JOIN snap s
+    ON o.member_id = s.member_id AND o.order_date >= s.extract_date
+  ORDER BY o.order_id""").fetchall())
+
+# 做法二：先整理成 SCD2（只在屬性變時開新版本），查詢只剩區間判斷
+con.sql("""CREATE TABLE dim_member AS
+  WITH chg AS (
+    SELECT *, lag(member_level) OVER (PARTITION BY member_id ORDER BY extract_date) AS prev
+    FROM snap)
+  SELECT member_id, member_level, extract_date AS valid_from,
+         coalesce(lead(extract_date) OVER (PARTITION BY member_id ORDER BY extract_date),
+                  DATE '9999-12-31') AS valid_to
+  FROM chg WHERE prev IS NULL OR prev <> member_level""")
+print(con.sql("SELECT * FROM dim_member ORDER BY valid_from").fetchall())
+print(con.sql("""
+  SELECT o.order_id, d.member_level
+  FROM orders o JOIN dim_member d
+    ON o.member_id = d.member_id AND d.valid_from <= o.order_date AND o.order_date < d.valid_to
+  ORDER BY o.order_id""").fetchall())
+```
+
+實際輸出（duckdb 1.5.6）：
+
+```
+[('O1', '銀卡'), ('O2', '金卡')]
+[('M001', '銀卡', datetime.date(2026, 4, 30), datetime.date(2026, 5, 31)), ('M001', '金卡', datetime.date(2026, 5, 31), datetime.date(9999, 12, 31))]
+[('O1', '銀卡'), ('O2', '金卡')]
+```
+
+兩種做法答案相同；6/30 那份沒變的快照在 SCD2 裡不會多一版。
+
+**本專案**：`members.csv` 有 3 份快照，4/30 是 8,030 列（8,000 位會員，同日重複 30 組，30 組的等級全都矛盾；其中 28 位的最新快照就是這天，SCD2 整理時要隔離），5/31 只有 459 列、6/30 只有 502 列；989 位會員有 2～3 列，等級不只一種的有 434 位：跨快照日變過的 406 位，加上只因同日矛盾而出現兩種等級的 28 位。原程式的 `build_fact` 直接 join 原始快照、又沒取「當時」那份，所以一對多放大（Part B #7）。
+
 ## 名詞表
 | 名詞 | 說明 |
 |---|---|

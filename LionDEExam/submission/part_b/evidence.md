@@ -41,6 +41,7 @@
 | #9（各增量檔與 base 重疊）、#1（金額例子） | E11 |
 | `prod-recovery.md`（prod 資料怎麼復原） | E10（引用 [2]、[3]；其餘情境為修正後 MERGE 的行為驗證） |
 | #9、5.1（MERGE 來源同 key 多列）、#1（`enforceSchema`）、#4（換算乘法的型別） | E12 |
+| `README.md`「修正 diff 實跑過」、#1～#11 的修正 diff 端到端實跑（重跑冪等、隔離與對帳） | E13 |
 
 ## E1｜主要數字重算（#2～#4、#6、#7、#9）
 
@@ -168,6 +169,8 @@ for name, rows in [("base", base), ("day1", d1), ("day2", d2), ("day3", load("or
 [#7] day2 amount<=0：0
 [#7] day3 amount<=0：0
 ```
+
+434 的拆解（28 位同日矛盾＋406 位跨快照日變過）見 E9 末尾。
 
 上面輸出的「撞號」是腳本當時的標籤，第二輪驗收後已改為「與官方語意不符的現象，需向上游確認」，數字不變。
 
@@ -627,6 +630,36 @@ JPY: 取絕對值後落在正數列 min~p99 內 4/4
 {'order_id': 'ORD00018643', 'currency': 'USD', 'amount': '-17089.38', 'order_status': 'completed', 'quantity': '3', 'coupon_discount': '250.0'}
 ```
 
+- E9 補：E1 `[#6]` 輸出中 434 的拆解（2026-10-11 補）：434 位「member_level 有兩種以上值」的多快照會員中，有 28 位只有一個 `extract_date`，兩種等級來自同日兩列矛盾，不是跨快照的變化；跨快照日變過的是 406 位。406 位中有 2 位（M000356、M002198）4/30 本身也有兩列矛盾，是否真的變過無法單從資料判斷。腳本存成 `m406.py`，以 `python3 -I m406.py candidate_package/dataset` 執行（在 `LionDEExam/` 下）。
+
+```python
+import csv, sys, os, collections
+rows = list(csv.DictReader(open(os.path.join(sys.argv[1], "members.csv"), encoding="utf-8-sig")))
+by = collections.defaultdict(list)
+for r in rows:
+    by[r["member_id"]].append(r)
+multi = {m: rs for m, rs in by.items() if len(rs) > 1}
+one_date = [m for m, rs in multi.items() if len({r["extract_date"] for r in rs}) == 1]
+print("多列會員:", len(multi), "其中只有一個 extract_date:", len(one_date))
+for col in ("member_level", "city"):
+    total = sum(len({r[col] for r in rs}) > 1 for rs in multi.values())
+    same_day = sum(len({r[col] for r in multi[m]}) > 1 for m in one_date)
+    print(col, "兩種以上值:", total, "其中只有一個 extract_date（同日矛盾）:", same_day, "跨快照日變過:", total - same_day)
+both = [m for m, rs in multi.items()
+        if len({r["extract_date"] for r in rs}) > 1
+        and any(sum(r2["extract_date"] == r["extract_date"] for r2 in rs) > 1 for r in rs)]
+print("跨快照日的會員中，同時也有同日重複列:", sorted(both))
+```
+
+輸出：
+
+```
+多列會員: 989 其中只有一個 extract_date: 28
+member_level 兩種以上值: 434 其中只有一個 extract_date（同日矛盾）: 28 跨快照日變過: 406
+city 兩種以上值: 376 其中只有一個 extract_date（同日矛盾）: 0 跨快照日變過: 376
+跨快照日的會員中，同時也有同日重複列: ['M000356', 'M002198']
+```
+
 ## E10｜Delta 寫入後的錯誤處理：重跑、RESTORE、VACUUM、並行衝突（prod-recovery.md）
 
 驗證報告建議的 fact 寫法（以 `order_id` MERGE，`whenMatchedUpdateAll(condition="s.updated_at > t.updated_at")`＋`whenNotMatchedInsertAll`）寫入之後，出錯時能不能復原。不讀 dataset，只用自建的幾列小資料（`order_id`、`order_status`、`updated_at`），Delta 表寫在 `/tmp` 下的暫存目錄，跑完刪除。
@@ -1058,3 +1091,322 @@ pyspark 4.2.0 delta-spark 4.4.1 ansi true
 - `[1]` 結論：來源同 key 多列且對到目標既有列時報 `DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW_IN_MERGE`；目標沒有的 key 則**不報錯**，兩列都被 insert（O9 變成兩列）。所以 MERGE 前一定要先讓來源每個 key 只剩一列。
 - `[2]` 結論：day1 實際檔（表頭含 UTF-8 BOM）在 `enforceSchema` 為 true 或 false 時都能正常讀取，列數 4615。表頭欄位對調時，`enforceSchema=true` 照位置套 schema，`amount` 和 `coupon_discount` 靜默互換；`enforceSchema=false` 報 `CSV header does not conform to the schema`。
 - `[3]` 結論：ANSI 開啟時字串相乘報 `DATATYPE_MISMATCH`；decimal 乘 double 結果是 double；`when(F.lit(1))` 配字串匯率會被轉成 bigint 而報 `CAST_INVALID_INPUT`；兩邊都先 cast 成 decimal 才得到 decimal 結果，TWD（匯率 null）也正確算出 100。
+
+## E13｜修正 diff 套用後的端到端實跑（README、#1～#11）
+
+`README.md`「證據怎麼來的」說修正 diff 實跑過，本節用目前版本的報告重做一次並收錄腳本，可自行重跑：從 `code-review.md` 第 4 節抽出全部 `diff` 程式碼區塊，套到 `buggy_pipeline.py` 的副本（原檔不動），在全新的本機暫存 lakehouse 用 day1 真實資料執行修正版的 `main("day1")`。這裡執行的是**修正後**的程式，不是原管線。
+
+**套用順序**：#1 → #2 → #3 → #4 → #5 → #6 → #7 → #8 → #10 → #9 → #11。#10 的 diff 以原本 `mode("append")` 那行寫入當上下文，#9 再把它換成 MERGE，所以 #10 要先套；#1 拿掉 `DoubleType` 的 import、#5 拿掉用到它的 UDF，兩者要一起套才能執行。套用器要求每個片段的上下文在當下的程式裡剛好比對到一處，否則停止。
+
+**示意段落用補實作替換**：#6 的 diff 把原本取快照到寫入的整段換成一行佔位註解；套用器把它換成報告「修正後」的 python 區塊（原樣），後面接一行呼叫 `_scd2_merge(chg, ambiguous)`。報告標為示意的兩段（#6 的 MERGE 兩步、#11 的 `initial_load_dim_member`）由 `e13_supplement.py` 補上，接在程式檔尾。**`e13_supplement.py` 是驗證用的補實作，不是報告的修正內容**；寫法照 #6 (c) 的註解與 `appendix.md`「SCD2 初始載入」的做法一（依 `extract_date` 由舊到新逐批 MERGE，第一版 `valid_from` 用第一筆快照的 `extract_date`）。
+
+**執行方式**：把下面三支腳本存到 `/tmp/partb_e13/`，在 `LionTest/` 執行：
+
+```
+python3 -I /tmp/partb_e13/e13_apply.py LionDEExam/submission/part_b/code-review.md LionDEExam/candidate_package/buggy_pipeline.py /tmp/partb_e13/e13_supplement.py /tmp/partb_e13/patched_pipeline.py
+uv run python /tmp/partb_e13/e13_run.py /tmp/partb_e13/patched_pipeline.py LionDEExam/candidate_package/dataset 2>/dev/null
+```
+
+執行器把 lakehouse 建在 `tempfile.mkdtemp()` 的新目錄，執行後刪除；`LAKEHOUSE` 在載入修正版模組後改指向該目錄，landing 只放 day1 增量、members、products、fx 四個檔。執行器另外包了一層 `write_fact`，只在呼叫前印出 `main()` 傳入的 `n_input`、`n_quarantined` 與當下各類隔離筆數，不改變行為。
+
+套用器 `e13_apply.py`：
+
+```python
+"""E13 套用器：從 code-review.md 抽出所有 ```diff 區塊，依序套到 buggy_pipeline.py 的副本，
+再把 #6 的「修正後」python 區塊與 E13 補實作（e13_supplement.py）接上，輸出可執行的修正版。
+用法：python3 -I e13_apply.py <code-review.md> <buggy_pipeline.py> <e13_supplement.py> <輸出路徑>"""
+import re, sys
+
+md_path, src_path, sup_path, out_path = sys.argv[1:5]
+md = open(md_path, encoding="utf-8").read().splitlines()
+src = open(src_path, encoding="utf-8").read().splitlines()
+
+# 1) 依「#### #N」標題，把 ```diff 與 ```python 區塊歸到各問題
+diffs, pyblocks, issue, cur, kind = {}, {}, None, None, None
+for line in md:
+    m = re.match(r"#### #(\d+) ", line)
+    if m:
+        issue = int(m.group(1))
+    if cur is None and line in ("```diff", "```python"):
+        cur, kind = [], line[3:]
+        continue
+    if cur is not None and line.startswith("```"):
+        (diffs if kind == "diff" else pyblocks).setdefault(issue, []).append(cur)
+        cur = None
+        continue
+    if cur is not None:
+        cur.append(line)
+print("diff 區塊數:", {k: len(v) for k, v in sorted(diffs.items())}, "python 區塊:", sorted(pyblocks))
+
+# 2) 套用順序：#10 與 #9 改到同一行寫入，#10 的 diff 以原本的 append 寫入行當上下文，所以先套 #10 再套 #9
+ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 10, 9, 11]
+assert sorted(ORDER) == sorted(diffs), f"報告的 diff 問題編號與 ORDER 不符：{sorted(diffs)}"
+for n in ORDER:
+    for b, block in enumerate(diffs[n], 1):
+        hunks = [[]]
+        for line in block:
+            if line.startswith("@@"):
+                hunks.append([])
+            else:
+                hunks[-1].append(line)
+        for h, hunk in enumerate([x for x in hunks if x], 1):
+            old = [l[1:] for l in hunk if not l.startswith("+")]
+            new = [l[1:] for l in hunk if not l.startswith("-")]
+            pos = [i for i in range(len(src) - len(old) + 1) if src[i:i + len(old)] == old]
+            if len(pos) != 1:
+                sys.exit(f"#{n} 區塊{b} 片段{h}：上下文比對到 {len(pos)} 處（需剛好 1 處），停止")
+            src[pos[0]:pos[0] + len(old)] = new
+            print(f"#{n} 區塊{b} 片段{h}：套用於第 {pos[0] + 1} 行（刪 {sum(l.startswith('-') for l in hunk)} 行、增 {sum(l.startswith('+') for l in hunk)} 行）")
+
+# 3) #6 的 diff 留下一行佔位註解：換成報告「修正後」的 python 區塊（原樣），再接 E13 補實作的 MERGE 兩步
+ph = [i for i, l in enumerate(src) if "換成下方「修正後」整段" in l]
+assert len(ph) == 1 and len(pyblocks[6]) == 1
+body = ["    " + l if l else "" for l in pyblocks[6][0]]
+body.append("    _scd2_merge(chg, ambiguous)   # 〔E13 補實作〕上面註解的 MERGE 兩步，見 e13_supplement.py")
+src[ph[0]:ph[0] + 1] = body
+print(f"#6 佔位註解換成報告 python 區塊 {len(pyblocks[6][0])} 行＋補實作呼叫 1 行")
+
+# 4) 補實作（_scd2_merge、initial_load_dim_member）接在檔尾
+sup = open(sup_path, encoding="utf-8").read().splitlines()
+src += ["", ""] + sup
+open(out_path, "w", encoding="utf-8").write("\n".join(src) + "\n")
+print("輸出", out_path, "共", len(src), "行")
+```
+
+補實作 `e13_supplement.py`（**驗證用的補實作，不是報告的修正內容**）：
+
+```python
+# ===========================================================================
+# 〔E13 補實作〕以下是驗證用的補實作，不是報告的修正內容。
+# 報告 #6 (c) 的 MERGE 兩步、#11 的 initial_load_dim_member 標為示意；
+# 為了讓修正版能端到端執行，照報告註解與附錄「SCD2 初始載入」（逐批 MERGE、第一版 valid_from＝第一筆快照的 extract_date）補上。
+# 本段接在套用 diff 後的程式檔尾，使用該程式的 spark、F、DeltaTable、LAKEHOUSE、update_dim_member。
+# ===========================================================================
+DIM_SCHEMA = ("member_id string, member_name string, member_level string, city string, "
+              "valid_from string, valid_to string, is_current boolean")
+
+
+def _scd2_merge(chg, ambiguous):
+    """報告 #6 (c) 註解的兩步：1) 關閉 chg 中已存在會員的目前版本；2) 插入 chg 全部的新版本。"""
+    path = f"{LAKEHOUSE}/dim/dim_member"
+    rows = chg.select(
+        "member_id",
+        F.col("s.member_name").alias("member_name"),
+        F.col("s.member_level").alias("member_level"),
+        F.col("s.city").alias("city"),
+        F.col("s.extract_date").alias("extract_date"),
+        F.col("d.member_id").isNotNull().alias("existed"),
+    ).localCheckpoint()   # 先固定結果：第 1 步改了 dim，chg 若重算會讀到改過的 dim
+    # 1) MERGE：已存在會員的目前版本 valid_to=extract_date、is_current=false
+    (DeltaTable.forPath(spark, path).alias("t")
+        .merge(rows.filter("existed").alias("s"), "t.member_id = s.member_id AND t.is_current")
+        .whenMatchedUpdate(set={"valid_to": "s.extract_date", "is_current": "false"})
+        .execute())
+    # 2) INSERT：新版本 valid_from=extract_date、valid_to='9999-12-31'、is_current=true
+    (rows.select("member_id", "member_name", "member_level", "city",
+                 F.col("extract_date").alias("valid_from"),
+                 F.lit("9999-12-31").alias("valid_to"),
+                 F.lit(True).alias("is_current"))
+        .write.format("delta").mode("append").save(path))
+    print(f"〔E13 補實作〕dim MERGE：關閉舊版 {rows.filter('existed').count()}、插入新版 {rows.count()}、"
+          f"同分不更新 {ambiguous.select('member_id').distinct().count()} 位")
+
+
+def initial_load_dim_member(members):
+    """建空表，再依 extract_date 由舊到新逐批套 #6 的邏輯（附錄「SCD2 初始載入」的做法一）。"""
+    spark.createDataFrame([], DIM_SCHEMA).write.format("delta").save(f"{LAKEHOUSE}/dim/dim_member")
+    for d in sorted(r[0] for r in members.select("extract_date").distinct().collect()):
+        print(f"〔E13 補實作〕初始載入 extract_date={d}")
+        update_dim_member(members.filter(F.col("extract_date") == d))
+```
+
+執行器 `e13_run.py`：
+
+```python
+"""E13 執行器：在全新的本機 lakehouse 跑套用修正後的管線。
+情境 A：day1 原檔跑 main("day1") 兩次；情境 B：day1 加 4 列壞資料跑一次。
+用法：uv run python e13_run.py <patched_pipeline.py> <dataset 目錄> 2>/dev/null"""
+import contextlib, csv, importlib.util, io, os, shutil, sys, tempfile, pyspark
+from importlib.metadata import version
+from pyspark.sql import SparkSession, functions as F
+from delta import configure_spark_with_delta_pip
+
+patched, ds = sys.argv[1], sys.argv[2]
+spark = configure_spark_with_delta_pip(SparkSession.builder.master("local[2]").config("spark.ui.enabled", "false")
+    .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+    .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")).getOrCreate()
+spark.sparkContext.setLogLevel("OFF")
+print("pyspark", pyspark.__version__, "delta-spark", version("delta-spark"), "ansi", spark.conf.get("spark.sql.ansi.enabled"))
+
+spec = importlib.util.spec_from_file_location("patched_pipeline", patched)
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)   # 模組內的 getOrCreate() 取到上面這個 Delta session
+
+# 觀測用：攔下 main 傳給 write_fact 的對帳數字與當下各類隔離筆數（不改變行為）
+_orig_write_fact = m.write_fact
+def _observe_write_fact(fact, n_input, n_quarantined):
+    print(f"  寫入前對帳 n_input={n_input} n_quarantined={n_quarantined} "
+          f"隔離各類={ {k: q.count() for k, q in m.QUARANTINE.items()} }")
+    return _orig_write_fact(fact, n_input, n_quarantined)
+m.write_fact = _observe_write_fact
+
+def new_lakehouse(root, name):
+    lh = os.path.join(root, name)
+    os.makedirs(f"{lh}/landing")
+    for f in ("members.csv", "products.csv", "fx_rates.csv", "orders_incremental_day1.csv"):
+        shutil.copy(os.path.join(ds, f), f"{lh}/landing/{f}")
+    return lh
+
+def run_main(batch):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        m.main(batch)
+    lines = buf.getvalue().splitlines()
+    table = [l for l in lines if l.startswith(("+", "|")) or l.startswith("only showing")]
+    for l in lines:
+        if l not in table:
+            print("  " + l)
+    print(f"  （寫入後 show() 的 order_date 計數表 {len(table)} 行略，列的順序不固定）")
+
+def report(lh, tag):
+    t = spark.read.format("delta").load(f"{lh}/fact/fact_order")
+    d = spark.read.format("delta").load(f"{lh}/dim/dim_member")
+    s = t.agg(F.count("*").alias("rows"), F.countDistinct("order_id").alias("oid"),
+              F.sum(F.col("amount_twd").isNull().cast("int")).alias("null_twd"),
+              F.sum(F.col("member_level").isNull().cast("int")).alias("null_level"),
+              F.sum("amount_twd").alias("sum_twd")).first()
+    print(f"{tag} fact 列數={s.rows} distinct order_id={s.oid} amount_twd null={s.null_twd} "
+          f"member_level null={s.null_level} amount_twd 型別={t.schema['amount_twd'].dataType.simpleString()} 加總={s.sum_twd}")
+    print(f"{tag} dim 列數={d.count()} 目前版本={d.filter('is_current').count()} 會員數={d.select('member_id').distinct().count()}")
+    h = spark.sql(f"DESCRIBE HISTORY delta.`{lh}/fact/fact_order`").orderBy("version").select("version", "operation").collect()
+    print(f"{tag} fact DESCRIBE HISTORY:", [(r.version, r.operation) for r in h])
+    return t
+
+root = tempfile.mkdtemp(prefix="partb_e13_lh_")
+
+# 情境 A：day1 原檔，同一個 lakehouse 跑兩次
+lh = new_lakehouse(root, "A")
+m.LAKEHOUSE = lh
+for i in (1, 2):
+    print(f"[A] 第 {i} 次 main('day1')")
+    run_main("day1")
+    report(lh, f"[A{i}]")
+mem = spark.read.option("header", True).csv(f"{lh}/landing/members.csv")
+top = mem.groupBy("member_id").agg(F.max("extract_date").alias("extract_date")).join(mem, ["member_id", "extract_date"])
+amb = top.groupBy("member_id").count().filter("count > 1").select("member_id")
+missing = mem.select("member_id").distinct().join(spark.read.format("delta").load(f"{lh}/dim/dim_member"), "member_id", "left_anti")
+print(f"[A] members.csv 會員數={mem.select('member_id').distinct().count()} dim 沒有任何版本的會員={missing.count()} "
+      f"其中最新快照同分={missing.join(amb, 'member_id', 'left_semi').count()}")
+
+# 情境 B：day1 複製一份，加 4 列壞資料（模板取 day1 第一列，只改對應欄位）
+lh = new_lakehouse(root, "B")
+m.LAKEHOUSE = lh
+p = f"{lh}/landing/orders_incremental_day1.csv"
+with open(p, encoding="utf-8-sig", newline="") as fh:
+    rows = list(csv.DictReader(fh))
+tpl = rows[0]
+bad = {
+    "BAD0001": ({"amount": "-13100.0"}, "invalid_amount"),   # 負數金額
+    "BAD0002": ({"amount": ""}, "invalid_amount"),           # 空金額
+    "BAD0003": ({"currency": "EUR", "amount": "500.0"}, "missing_fx"),   # 沒有匯率的幣別
+    "BAD0004": ({"product_id": "P99999"}, "unknown_product"),            # 不存在的產品
+}
+for oid, (chg, _) in bad.items():
+    rows.append({**tpl, **chg, "order_id": oid})
+with open(p, "w", encoding="utf-8-sig", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=list(tpl))
+    w.writeheader()
+    w.writerows(rows)
+print(f"[B] 壞資料列：{[(k, v[0]) for k, v in bad.items()]}；模板 {tpl['order_id']} {tpl['currency']} {tpl['product_id']}")
+print("[B] main('day1')")
+run_main("day1")
+t = report(lh, "[B]")
+ids = list(bad)
+print("[B] fact 中的壞資料列數:", t.filter(F.col("order_id").isin(ids)).count())
+for k, q in m.QUARANTINE.items():
+    got = sorted(r.order_id for r in q.filter(F.col("order_id").isin(ids)).select("order_id").collect())
+    exp = sorted(o for o, (_, kind) in bad.items() if kind == k)
+    print(f"[B] 隔離 {k}: 總數={q.count()} 壞資料={got} 預期={exp} {'OK' if got == exp else 'MISMATCH'}")
+
+spark.stop()
+shutil.rmtree(root, ignore_errors=True)
+```
+
+套用器輸出：
+
+```
+diff 區塊數: {1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 2, 8: 1, 9: 1, 10: 1, 11: 1} python 區塊: [6]
+#1 區塊1 片段1：套用於第 15 行（刪 1 行、增 2 行）
+#1 區塊1 片段2：套用於第 26 行（刪 2 行、增 14 行）
+#2 區塊1 片段1：套用於第 53 行（刪 5 行、增 2 行）
+#3 區塊1 片段1：套用於第 49 行（刪 0 行、增 2 行）
+#3 區塊1 片段2：套用於第 67 行（刪 1 行、增 3 行）
+#4 區塊1 片段1：套用於第 88 行（刪 2 行、增 7 行）
+#5 區塊1 片段1：套用於第 79 行（刪 7 行、增 0 行）
+#6 區塊1 片段1：套用於第 100 行（刪 27 行、增 1 行）
+#7 區塊1 片段1：套用於第 110 行（刪 2 行、增 9 行）
+#7 區塊2 片段1：套用於第 165 行（刪 1 行、增 1 行）
+#8 區塊1 片段1：套用於第 122 行（刪 1 行、增 4 行）
+#10 區塊1 片段1：套用於第 147 行（刪 7 行、增 19 行）
+#9 區塊1 片段1：套用於第 128 行（刪 0 行、增 1 行）
+#9 區塊1 片段2：套用於第 162 行（刪 3 行、增 9 行）
+#11 區塊1 片段1：套用於第 14 行（刪 0 行、增 3 行）
+#11 區塊1 片段2：套用於第 101 行（刪 0 行、增 2 行）
+#11 區塊1 片段3：套用於第 188 行（刪 1 行、增 4 行）
+#11 區塊1 片段4：套用於第 197 行（刪 1 行、增 2 行）
+#11 區塊1 片段5：套用於第 202 行（刪 1 行、增 1 行）
+#6 佔位註解換成報告 python 區塊 16 行＋補實作呼叫 1 行
+輸出 /tmp/partb_e13/patched_pipeline.py 共 263 行
+```
+
+執行器輸出（pyspark 4.2.0、delta-spark 4.4.1，預設 ANSI 開啟）：
+
+```
+pyspark 4.2.0 delta-spark 4.4.1 ansi true
+[A] 第 1 次 main('day1')
+  〔E13 補實作〕初始載入 extract_date=2026-04-30
+  〔E13 補實作〕dim MERGE：關閉舊版 0、插入新版 7970、同分不更新 30 位
+  〔E13 補實作〕初始載入 extract_date=2026-05-31
+  〔E13 補實作〕dim MERGE：關閉舊版 363、插入新版 365、同分不更新 0 位
+  〔E13 補實作〕初始載入 extract_date=2026-06-30
+  〔E13 補實作〕dim MERGE：關閉舊版 410、插入新版 410、同分不更新 0 位
+  〔E13 補實作〕dim MERGE：關閉舊版 0、插入新版 0、同分不更新 28 位
+    寫入前對帳 n_input=4597 n_quarantined=0 隔離各類={'invalid_amount': 0, 'missing_fx': 0, 'unknown_product': 0}
+  🎉 管線執行成功！資料品質已確保。
+  （寫入後 show() 的 order_date 計數表 25 行略，列的順序不固定）
+[A1] fact 列數=4597 distinct order_id=4597 amount_twd null=0 member_level null=17 amount_twd 型別=decimal(37,8) 加總=1210586615.22155000
+[A1] dim 列數=8745 目前版本=7972 會員數=7972
+[A1] fact DESCRIBE HISTORY: [(0, 'WRITE')]
+[A] 第 2 次 main('day1')
+  〔E13 補實作〕dim MERGE：關閉舊版 0、插入新版 0、同分不更新 28 位
+    寫入前對帳 n_input=4597 n_quarantined=0 隔離各類={'invalid_amount': 0, 'missing_fx': 0, 'unknown_product': 0}
+  🎉 管線執行成功！資料品質已確保。
+  （寫入後 show() 的 order_date 計數表 25 行略，列的順序不固定）
+[A2] fact 列數=4597 distinct order_id=4597 amount_twd null=0 member_level null=17 amount_twd 型別=decimal(37,8) 加總=1210586615.22155000
+[A2] dim 列數=8745 目前版本=7972 會員數=7972
+[A2] fact DESCRIBE HISTORY: [(0, 'WRITE'), (1, 'MERGE')]
+[A] members.csv 會員數=8000 dim 沒有任何版本的會員=28 其中最新快照同分=28
+[B] 壞資料列：[('BAD0001', {'amount': '-13100.0'}), ('BAD0002', {'amount': ''}), ('BAD0003', {'currency': 'EUR', 'amount': '500.0'}), ('BAD0004', {'product_id': 'P99999'})]；模板 ORD00102010 TWD P00096
+[B] main('day1')
+  〔E13 補實作〕初始載入 extract_date=2026-04-30
+  〔E13 補實作〕dim MERGE：關閉舊版 0、插入新版 7970、同分不更新 30 位
+  〔E13 補實作〕初始載入 extract_date=2026-05-31
+  〔E13 補實作〕dim MERGE：關閉舊版 363、插入新版 365、同分不更新 0 位
+  〔E13 補實作〕初始載入 extract_date=2026-06-30
+  〔E13 補實作〕dim MERGE：關閉舊版 410、插入新版 410、同分不更新 0 位
+  〔E13 補實作〕dim MERGE：關閉舊版 0、插入新版 0、同分不更新 28 位
+    寫入前對帳 n_input=4601 n_quarantined=4 隔離各類={'invalid_amount': 2, 'missing_fx': 1, 'unknown_product': 1}
+  🎉 管線執行成功！資料品質已確保。
+  （寫入後 show() 的 order_date 計數表 25 行略，列的順序不固定）
+[B] fact 列數=4597 distinct order_id=4597 amount_twd null=0 member_level null=17 amount_twd 型別=decimal(37,8) 加總=1210586615.22155000
+[B] dim 列數=8745 目前版本=7972 會員數=7972
+[B] fact DESCRIBE HISTORY: [(0, 'WRITE')]
+[B] fact 中的壞資料列數: 0
+[B] 隔離 invalid_amount: 總數=2 壞資料=['BAD0001', 'BAD0002'] 預期=['BAD0001', 'BAD0002'] OK
+[B] 隔離 missing_fx: 總數=1 壞資料=['BAD0003'] 預期=['BAD0003'] OK
+[B] 隔離 unknown_product: 總數=1 壞資料=['BAD0004'] 預期=['BAD0004'] OK
+```
+
+- 情境 A 結論：day1 跑兩次，fact 都是 4,597 列、4,597 個 distinct `order_id`、`amount_twd` 沒有 null，金額加總相同；寫入前對帳 `n_input` 4,597 ＝ 寫入 4,597 ＋ 隔離 0。fact 的 `DESCRIBE HISTORY` 第一次是 `WRITE`、第二次是 `MERGE`，重跑沒有新增列。dim 為 8,745 列、7,972 位會員各一個目前版本，重跑不變；`members.csv` 共 8,000 位會員，dim 沒有任何版本的 28 位全是最新快照同分、被隔離不更新的會員。`member_level` 為 null 的 17 張訂單，數字與 #7 (b)、E7「同分隔離後仍對不到的 17 張」一致。
+- 情境 B 結論：加入的 4 列壞資料分別進入 `invalid_amount`（負數、空金額）、`missing_fx`（EUR）、`unknown_product`（P99999）；`n_input` 4,601 ＝ 寫入 4,597 ＋ 隔離 4，fact 不含這 4 列。
+- 限制：只測 day1，沒有測 day2、day3 接續執行與跨日訂單更新；#6 的 MERGE 兩步與 `initial_load_dim_member` 是補實作，驗證的是「照報告的描述實作後可以跑通」，不是報告本身的程式碼；隔離列只存在記憶體中的 `QUARANTINE`，沒有寫成隔離表；同分會員只計數，沒有寫成隔離表或告警。

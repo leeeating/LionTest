@@ -9,7 +9,7 @@
 1. **靜態閱讀**：逐函式追資料流，對每個寫入、filter、join 檢查四件事：重跑會怎樣、哪些列會消失或變多、數字算得對不對、SCD2 是否完整。
 2. **用真實資料量化影響**：題目要求不執行原管線，所以 `buggy_pipeline.py` 本身沒有執行，只用 `python3 -m py_compile` 確認語法正確。「業務影響」中的筆數，是用 Python 標準庫 `csv` 直接讀 `candidate_package/dataset/` 算出「如果這段邏輯跑下去會影響幾筆」。
 3. **靜態分析**：用 ruff 0.17.0（預設規則，專案沒有 ruff 設定檔）與 mypy 2.4.0 檢查 `buggy_pipeline.py`，看工具能自動抓到哪些問題，結果見下方「靜態分析（ruff、mypy）」。
-4. **用小資料驗證關鍵語意**：撰寫期間另外在本機 `.venv`（pyspark 4.2＋delta-spark）用自建的小資料驗證三個語意：`dropDuplicates` 之後再套 window 沒有作用（#2）、`"replaceWhere", "member_id IS NOT NULL"` 搭配 overwrite 會清表（#6）、字串金額和整數比較的隱式轉型（#1）。以上查詢、腳本與輸出見 [evidence.md](evidence.md)；資料結構見 `notes/dataset/`。
+4. **用小資料驗證關鍵語意**：撰寫期間另外在本機 `.venv`（pyspark 4.2＋delta-spark）用自建的小資料驗證關鍵語意：`dropDuplicates` 之後再套 window 沒有作用（#2）、`"replaceWhere", "member_id IS NOT NULL"` 搭配 overwrite 會清表（#6）、字串金額和整數比較的隱式轉型（#1）（E5、E6）；Delta 的重跑、RESTORE、VACUUM、並行衝突（E10）；MERGE 來源同 key 多列、`enforceSchema`、換算乘法的型別（E12）。以上查詢、腳本與輸出見 [evidence.md](evidence.md)；資料結構見 `notes/dataset/`。
 5. **嚴重度**：分 P0～P2，定義見報告「問題總表」。
 
 ## 靜態分析（ruff、mypy）
@@ -61,7 +61,7 @@ $ uv run --with mypy mypy --strict LionDEExam/candidate_package/buggy_pipeline.p
 
 補充報告 #6 (c) 的「初始載入」。
 
-報告 #6 (c) 的寫法每次只拿每位會員最新的 `extract_date` 去 MERGE，適用於 dim 已有歷史之後的每日增量。dim 從空表開始時，若直接拿現在的 `members` 跑，每位會員只會建出最新的一版，2026-04-30、05-31 的舊快照永遠進不了 dim，#6 (b) 的 434 位等級變過的會員，舊等級就丟了，等於退化成 SCD1。搭配 #7 的半開區間 join，`order_date` 早於該會員唯一一版 `valid_from` 的訂單對不到任何版本，`member_level` 變成 null：實測 day1 去重後（每個 order_id 留 `updated_at` 最新一列）4,597 張中有 49 張（48 位會員，`order_date` 落在 05-01～06-28），因為這些會員的最新 `extract_date` 是 05-31（16 張）或 06-30（33 張）。做法二選一，之後再接每日增量（只處理比 dim 已載入的最新 `extract_date` 更新的快照）：
+報告 #6 (c) 的寫法每次只拿每位會員最新的 `extract_date` 去 MERGE，適用於 dim 已有歷史之後的每日增量。dim 從空表開始時，若直接拿現在的 `members` 跑，每位會員只會建出最新的一版，2026-04-30、05-31 的舊快照永遠進不了 dim，#6 (b) 的 406 位跨快照日等級變過的會員，舊等級就丟了，等於退化成 SCD1。搭配 #7 的半開區間 join，`order_date` 早於該會員唯一一版 `valid_from` 的訂單對不到任何版本，`member_level` 變成 null：實測 day1 去重後（每個 order_id 留 `updated_at` 最新一列）4,597 張中有 49 張（48 位會員，`order_date` 落在 05-01～06-28），因為這些會員的最新 `extract_date` 是 05-31（16 張）或 06-30（33 張）。做法二選一，之後再接每日增量（只處理比 dim 已載入的最新 `extract_date` 更新的快照）：
 - **依 `extract_date` 由舊到新逐批 MERGE**（04-30 → 05-31 → 06-30）：沿用同一段邏輯，屬性沒變的批次自然不產生新版本，最單純。
 - **一次性回填全部快照**：用 window 依 `extract_date` 排序，以下一筆快照的 `extract_date` 當這一版的 `valid_to`；但要自己合併相鄰且屬性相同的快照（否則沒變也多一版），同日同分也要先處理。
 

@@ -70,6 +70,32 @@ log = [
 
 **Delta 表 ＝ 普通 Parquet 資料檔 ＋ Delta 定義的 metadata（`_delta_log/`）**：Parquet 管「資料長什麼樣」，Delta 管「哪些資料算數、怎麼安全地改」。`_delta_log/` 記的是：每個版本由哪些檔案組成、schema、檔案的 min／max 統計（預設只收前幾十個欄位，查詢時用來跳過不相關的檔案）、每次寫入的操作紀錄。規格除了 metadata 長相，還規定怎麼寫才安全：先寫資料檔、最後寫出下一號 log 檔才算數，所以寫到一半當機，讀的人看不到半成品；兩個程式同時寫入時，只有一個能寫出下一號 log 檔，另一個檢查有沒有衝突，沒衝突（例如單純 append）就自動重試，有衝突（例如兩個 MERGE 改到同一批資料）就丟例外，要由 pipeline 自己處理。也因此 lakehouse 的檔案不能手動刪改，log 會以為檔案還在。
 
+
+### VACUUM：把沒人用的舊檔真的刪掉
+**VACUUM 是 Delta 的清垃圾指令。** Delta 不改 Parquet 檔，每次更新、刪除、覆寫都是寫新檔，再在 log 記「這個版本改用新檔、舊檔標記移除」。舊檔還在磁碟上，所以 time travel 讀得到舊版本；VACUUM 把「目前版本沒在用、而且被標記移除超過保留期」的檔案實體刪掉。
+
+```text
+v0：用 a.parquet
+v1：overwrite → 加入 b.parquet，標記移除 a.parquet（a 的檔案還在）
+VACUUM（保留 7 天）→ a 被標記移除已超過 7 天 → 實體刪除
+```
+
+```python
+# 概念等價
+for f in files_on_disk:
+    if f not in current_version_files and f.removed_at < now - retention:
+        os.remove(f)
+```
+
+- **預設保留 7 天**（PROTOCOL.md），不會碰目前版本在用的檔。
+- **log 不會被它刪**：`DESCRIBE HISTORY` 仍列得出舊版本，但資料檔沒了，`versionAsOf` 與 `RESTORE` 都會失敗（Part B `evidence.md` E10 [3] 實測）。
+- **不會自動執行**：開源 Delta 要有人下指令或排程；Fabric 是否排程了表格維護要查 workspace 設定（未查證）。
+- **保留期太短會被擋**：低於保留期門檻（例如 0 小時）會報 `DELTA_VACUUM_RETENTION_PERIOD_TOO_SHORT`，要關掉檢查才能跑。原因是進行中的寫入（還沒 commit 的檔）可能被刪掉而讓表損壞，正在讀舊版本的查詢也可能失敗（錯誤訊息見 E10 [3]）。
+- **取捨**：保留期越長，能退回的時間越長，舊檔佔的儲存也越多。
+- **跟 log 保留期是兩回事**：log 本身也會在寫 checkpoint 時清掉超過保留期（`delta.logRetentionDuration`，預設 30 天，[Delta 文件](https://docs.delta.io/latest/delta-batch.html)）的部分。
+
+Part B 的 prod 復原第一步就是「暫停 VACUUM、調高保留期」：#6 覆寫掉的 dim 能不能用 time travel 救回，取決於舊檔還在不在（`part_b/prod-recovery.md`）。
+
 ## lakehouse 和 OLTP 的存法差異
 | | OLTP（例如 MySQL） | Lakehouse（Delta） |
 |---|---|---|
@@ -126,7 +152,7 @@ Delta 的記帳本沒有在本機實跑（需要 Spark＋Java），上面的 Pyt
 
 ## 常見的坑
 - **把 lake 當成 warehouse 用**：CSV 不定 schema，所有欄位都是字串，金額比大小靠隱式轉型（Part B #1）。
-- **以為 lakehouse 的舊版本永遠都在**：VACUUM 會真正刪掉作廢超過保留期的舊檔，刪了就不能 time travel；就算沒跑 VACUUM，記帳本本身超過保留期被清掉，舊版本也一樣回不去（Part B #6 的 dim 被覆寫，只在保留期內、VACUUM 之前救得回來）。VACUUM 的預設保留期是 7 天（PROTOCOL.md）；log 的預設保留期一般說法是 30 天，未證實。
+- **以為 lakehouse 的舊版本永遠都在**：VACUUM 會真正刪掉作廢超過保留期的舊檔，刪了就不能 time travel；就算沒跑 VACUUM，記帳本本身超過保留期被清掉，舊版本也一樣回不去（Part B #6 的 dim 被覆寫，只在保留期內、VACUUM 之前救得回來）。VACUUM 的預設保留期是 7 天（PROTOCOL.md）；log 的預設保留期是 30 天（`delta.logRetentionDuration`，[Delta 文件](https://docs.delta.io/latest/delta-batch.html)）。
 - **lake 裡的原始檔被覆蓋或刪掉**：之後表寫壞了就沒有原料可以重做。
 
 ## 本專案出處
@@ -135,7 +161,7 @@ Delta 的記帳本沒有在本機實跑（需要 Spark＋Java），上面的 Pyt
 - 題目 Part C 考 Lakehouse vs Warehouse 的架構取捨。
 
 ## 官方文件
-lake／warehouse／lakehouse 的分類是一般定義，未讀官方文件，可對照 Reis & Housley《Fundamentals of Data Engineering》的 storage 章節。log 的預設保留期未證實，寫 Part C 時要查 Delta Lake 官方文件確認。
+lake／warehouse／lakehouse 的分類是一般定義，未讀官方文件，可對照 Reis & Housley《Fundamentals of Data Engineering》的 storage 章節。
 
 Delta（驗收 agent 查證過）：
 - transaction log 的 action（add、remove、metaData、cdc 等）：https://github.com/delta-io/delta/blob/master/PROTOCOL.md
