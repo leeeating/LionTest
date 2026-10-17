@@ -69,6 +69,8 @@
 <a id="v4"></a>
 ## V4｜orders_base.currency = 'NTD'（200 筆）〔確定的錯誤值〕
 
+- 〔使用者判斷〕NTD 當成 TWD（匯率 1）。金額處理整體決定見 process-log「金額：原幣別與換算 TWD 都存」。
+
 - 違反：`CHECK (currency IN ('TWD','USD','JPY'))`（NTD 不是 ISO 4217 代碼，增量檔沒有）。也不在匯率表（base NTD 200）。
   <sub>證據：剖析輸出搜尋 `S7.currency_not_in_fx`</sub>
 - 為什麼確定是 TWD 的別名：以 1:1 換算時，NTD 的比值分布與 TWD 幾乎相同（NTD p01 0.8537 / p50 1.0347 / p99 1.2406；TWD 0.8541 / 1.0506 / 1.246），NTD 都是整數金額。若 NTD 是別的幣別，比值會整體偏移。NTD 分散在四個通路。
