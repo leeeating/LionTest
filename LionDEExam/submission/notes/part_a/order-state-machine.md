@@ -24,7 +24,7 @@
    └───────────┘
 ```
 
-實線是候選的合法轉移，虛線 ⑤ 待決定。依單向假設，**不存在**的轉移：cancelled → 任何狀態、completed → paid、paid → created。
+實線是候選的合法轉移；虛線 ⑤ 依使用者假設不存在。依單向假設，**不存在**的轉移：cancelled → 任何狀態、completed → paid、paid → created。
 
 ## 每條轉移的證據
 
@@ -43,6 +43,6 @@
 **單向假設對那 25 組的影響：** 照檔案到達順序，這 25 組是 cancelled → paid；在單向假設下這個順序不可能發生，照 `updated_at` 的 paid → cancelled 才合理。以哪個為準仍是 J6，待使用者判斷。
 
 ## 待決定
-1. ⑤ completed → cancelled 存在嗎？例如出團後才申請取消退款。
+1. ~~⑤ completed → cancelled 存在嗎？例如出團後才申請取消退款。~~ 〔使用者判斷〕先假設**不存在**：completed 之後不能取消（原話：「先假設completed後不能取消」）。資料裡的 completed → cancelled 只出現在撞號列（會員、金額、下單時間都不同），不是同一張單的歷程。
 2. 有沒有 created → completed 的直接跳轉？例如現場付款的票券。
 3. ~~`completed` 是指「出團完成」還是「交易完成」？~~ 〔使用者判斷〕先假設是**出團完成**（原話：「completed先假設成出團完成」）。**與資料衝突，待處理**：base 的 completed 全部在出發日之前（增量檔中只有與 base 撞號的 completed 列才有出發日已過的情形）（見 [schema-inference/order-time.md](schema-inference/order-time.md) 的 J8），照這個假設，completed 應該在出發日之後才出現，但 base 的 completed 共 28,612 列（base 100,040 列的 28.6%），出發日全部晚於 `updated_at` 的日期，這些列在此假設下都不合理（已排除時區：`updated_at` 全是 `+08:00`，出發日比更新日晚 4～119 天，中位數 62 天）。〔使用者判斷〕假設不變，這些列當資料品質問題處理，理由：「先把狀態規則定下來 之後比較好處理」。怎麼處理尚未決定。
