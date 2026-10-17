@@ -10,3 +10,8 @@ __pycache__/
 # 面試題目與素材不公開（公開 repo）
 LionDEExam/01_考題卷_資料工程師TakeHome.*
 LionDEExam/candidate_package/
+
+# Spark 在工作目錄自動產生的 catalog 檔
+spark-warehouse/
+metastore_db/
+derby.log

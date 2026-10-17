@@ -1,0 +1,7 @@
+.git
+.venv
+.claude
+spark-warehouse
+LionDEExam.zip
+**/__pycache__
+**/.pytest_cache
