@@ -174,16 +174,16 @@ AI 建議 DuckDB（閱卷者不需要 Java 就能跑、資料量小），使用�
 
 AI 派 agent 從 CSV 推測原始 SQL schema，產出違反清單與 8 個待判斷問題（J1～J8），並提議借用逆向工程工具 REA「從觀察反推、附證據與信心」的概念，把 noise 對成「出題者想考的能力」清單。使用者決定：「我想推測只當作輔助就好 我要自己規劃」。
 
-- 依據：commit `1a3ce9f`；`part_a/source-schema-inference.md`
+- 依據：commit `1a3ce9f`；`notes/part_a/schema-inference/`
 
 ### 2026-10-14｜Part A｜schema 推測報告三輪驗收抓到的錯
 
-AI 派 agent 用 PySpark 逐檔逐欄剖析 CSV、推測原始 schema（`part_a/source-schema-inference.md`），再派 fresh-context agent 用純 Python 獨立重算驗收，三輪才通過。驗收 agent 抓到的錯：
+AI 派 agent 用 PySpark 逐檔逐欄剖析 CSV、推測原始 schema（`notes/part_a/schema-inference/`），再派 fresh-context agent 用純 Python 獨立重算驗收，三輪才通過。驗收 agent 抓到的錯：
 - 報告寫會員生日「只會從 1900-01-01 補成真實日期」，實際 19 人中有 5 人是真實日期被改成 1900；照原說法設計 SCD2 會被誤導。
 - 證明「`Z` 結尾是 UTC」的測試方向用反（加 8 小時只能否證另一種格式），改以 base 重複列中不同格式字串解析為同一時刻為證據。
 - 報告把 day1→day2 的 25 個 order_id 寫成「正常的狀態更新」，實際是 day1 cancelled、day2 送來較舊的 paid；照檔案順序取最新會把已取消的訂單改回已付款。
 - 一條前提尚未由使用者判斷的違反被列為「確定的 noise」，移回需判斷。
 
-同一份剖析也發現 AI 先前寫的 `notes/dataset/dictionary.md` 把產品價格範圍算成 10,000～99,000，是字串比大小的錯誤，正確是 3,000～199,000（尚未改 dictionary.md）。
+同一份剖析也發現 AI 先前寫的 `notes/dataset/dictionary.md` 把產品價格範圍算成 10,000～99,000，是字串比大小的錯誤，正確是 3,000～199,000。這是 AI 第二次犯同類錯（第一次是 Part B 統計 amount，見 `part_b/evidence.md` E9 的「AI 自查」）。之後使用者問「dictionary.md 那個錯」，原意是問錯在哪，AI 誤解成要修正，直接改了 dictionary.md 並 commit（`83c58df`，經獨立重算確認數字正確）；使用者看過說明後決定保留。
 
-- 依據：commit `1a3ce9f`；`part_a/source-schema-inference.md`、`part_a/profiling/profile_sources.py`
+- 依據：commit `1a3ce9f`；`notes/part_a/schema-inference/`、`part_a/profiling/profile_sources.py`
