@@ -211,3 +211,9 @@ AI 派 agent 用 PySpark 逐檔逐欄剖析 CSV、推測原始 schema（`notes/p
 討論 fact_order 的三種型態時，AI 說明累積快照能回答大部分問題，前提是每個里程碑對一張單只發生一次；若允許取消後恢復，`paid_at` 這類欄位會被覆蓋。使用者決定：「那先簡單假設不能恢復」。這個假設也讓唯一鍵 `(order_id, status)` 在上游事件表的情境下成立（同一狀態不會出現兩次）。
 
 - 依據：commit `a06b335`；`notes/part_a/order-state-machine.md`
+
+### 2026-10-17｜Part A｜假設 completed 是出團完成，與 base 資料衝突
+
+畫訂單狀態機時，AI 列出待決定的問題之一：completed 是「出團完成」還是「交易完成」。使用者決定：「completed先假設成出團完成」。AI 指出這與資料衝突：base 的 completed 全部在出發日之前（`notes/part_a/schema-inference/order-time.md` 的 L10、J8），照此假設這些列都不合理。要當成資料品質問題處理，還是修正假設，尚未決定。
+
+- 依據：commit `19df745`；`notes/part_a/order-state-machine.md`
