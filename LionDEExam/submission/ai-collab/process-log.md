@@ -253,3 +253,9 @@ AI 算出 base 的 completed 有 28,612 列（base 的 28.6%）出發日都還�
 使用者問「照檔案順序是什麼意思」，AI 用 L4 那 25 組的例子（day1 cancelled、day2 送來 `updated_at` 較舊的 paid）說明：照檔案順序最新狀態是 paid，照 `updated_at` 是 cancelled。使用者決定：「照 updated_at，符合狀態機單向假設」。
 
 - 依據：commit `7847045`；`notes/part_a/schema-inference/order-time.md` J6
+
+### 2026-10-17｜Part A｜金額：原幣別與換算 TWD 都存
+
+AI 列出金額處理的四個子題與建議：原幣別金額與換算後 TWD 都存、匯率用下單日（台北日期；fx 涵蓋 04-28～07-03，每天都有 USD、JPY）、TWD 匯率固定為 1（fx 沒有 TWD，Part B 的 inner join 因此丟掉 TWD 訂單）、NTD（200 筆）當成 TWD（金額比值與 TWD 幾乎相同，V4）。使用者接受，理由：「原幣別保留可追溯，換算 TWD 讓營收能直接加總」。負數金額與疑似多乘 1,000 的列留到 A-3 一起決定。
+
+- 依據：commit `fb9736a`；`notes/part_a/schema-inference/order-amount.md` V4
