@@ -45,4 +45,4 @@
 ## 待決定
 1. ⑤ completed → cancelled 存在嗎？例如出團後才申請取消退款。
 2. 有沒有 created → completed 的直接跳轉？例如現場付款的票券。
-3. `completed` 是指「出團完成」還是「交易完成」？base 的 completed 全部在出發日之前（增量檔中只有與 base 撞號的 completed 列才有出發日已過的情形）（見 [schema-inference/order-time.md](schema-inference/order-time.md) 的 J8），這會影響 ④ 的意思。
+3. ~~`completed` 是指「出團完成」還是「交易完成」？~~ 〔使用者判斷〕先假設是**出團完成**（原話：「completed先假設成出團完成」）。**與資料衝突，待處理**：base 的 completed 全部在出發日之前（增量檔中只有與 base 撞號的 completed 列才有出發日已過的情形）（見 [schema-inference/order-time.md](schema-inference/order-time.md) 的 J8），照這個假設，completed 應該在出發日之後才出現，但 base 的 completed 共 28,612 列（base 100,040 列的 28.6%），出發日全部晚於 `updated_at` 的日期，這些列在此假設下都不合理。要把它們當成資料品質問題，還是回頭修正假設，待使用者判斷。
