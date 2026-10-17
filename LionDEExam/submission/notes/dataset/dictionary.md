@@ -96,7 +96,7 @@
 | product_type | 團體旅遊、機票、票券、自由行、訂房 |
 | destination_country | 台灣、土耳其、日本、法國、泰國、美國、義大利、越南、韓國 |
 | trip_days | 1 ~ 11 |
-| base_price_twd | 10,000 ~ 99,000 |
+| base_price_twd | 3,000 ~ 199,000，全部是 1,000 的倍數（舊版寫 10,000 ~ 99,000，是把字串拿來比大小的錯誤；更正依據見 `part_a/source-schema-inference.md` 的 `[S2.products_fmt]`） |
 | is_active | Y（287 筆）、N（13 筆） |
 
 - base 有 120 筆訂單的 product_id（例如 P91064）不在產品主檔裡。增量檔的 product_id 全部都對得到。
