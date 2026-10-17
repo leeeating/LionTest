@@ -153,3 +153,37 @@ AI 原本請使用者自己先讀 `buggy_pipeline.py`。使用者回：「你應
 AI 提議另做一份逐條確認清單讓使用者勾選定稿，使用者認為不需要：「我已經在對話中review產出了 不用再有確認清單」。Part B 的定稿依據就是本部分各事件記錄的審閱過程（質疑 merge 後能否復原、RESTORE、負數金額、照流程重排、show-me 改寫、406＋28、閱讀版 HTML 等）。資深 DE 角色審查指出、尚未處理的項目列在 `part_b/future-improvements.md`（A1、F1～F5）；B 類判斷不一致的項目使用者決定暫不處理。原 #12（現 #1）的嚴重度維持 P2。
 
 - 依據：commit `61dbb3f`
+
+## 第三部分：Part A 資料倉建置
+
+範圍：題目 Part A（A-1 模型設計、A-2 增量與冪等、A-3 資料品質）。開工前先依派工草稿 `.claude/work/part-a-prompt.md` 的「需要使用者決定的事」逐題對齊。
+
+### 2026-10-14｜Part A｜Part A 執行引擎選 PySpark＋Delta
+
+AI 建議 DuckDB（閱卷者不需要 Java 就能跑、資料量小），使用者選 PySpark＋Delta：「是給生產環境的 也查過雄獅旅遊的規模」，並要求把三個選項都寫進 ADR。AI 的 ADR 初稿在 B 的代價寫「資料量用不到分散式運算」，使用者指出「csv是demo資料 不能當作prod的資料量」；ADR 改為標明這只是 demo 資料量。見 ADR-01。
+
+- 依據：commit `49b89db`；ADR-01
+
+### 2026-10-14｜Part A｜管線以抽象來源設計，品質規則寫成 schema 合約
+
+對齊時使用者提出「這個pipline應該要可遷移」，也想「從sql db schema解決一些資料品質的問題」：題目給 CSV，但現實中的源頭是營運 SQL DB。AI 列了兩個方向：來源抽成介面（CSV 與 SQL 兩種實作回傳同一個 schema）並把品質規則寫成 Delta 表上的約束；或真的用 docker-compose 架 Postgres、CSV 灌進去再用 JDBC 讀。AI 也提醒 schema 只能擋、不能修（例如多乘 1,000 的金額仍然大於 0）。使用者選前者：「也不用真的架db 這提應該要讓我以抽象設計的方式解決」。見 ADR-02。
+
+- 依據：commit `49b89db`；ADR-02
+
+### 2026-10-14｜Part A｜AI 的 schema 推測只當輔助，規劃由使用者自己做
+
+AI 派 agent 從 CSV 推測原始 SQL schema，產出違反清單與 8 個待判斷問題（J1～J8），並提議借用逆向工程工具 REA「從觀察反推、附證據與信心」的概念，把 noise 對成「出題者想考的能力」清單。使用者決定：「我想推測只當作輔助就好 我要自己規劃」。
+
+- 依據：commit `1a3ce9f`；`part_a/source-schema-inference.md`
+
+### 2026-10-14｜Part A｜schema 推測報告三輪驗收抓到的錯
+
+AI 派 agent 用 PySpark 逐檔逐欄剖析 CSV、推測原始 schema（`part_a/source-schema-inference.md`），再派 fresh-context agent 用純 Python 獨立重算驗收，三輪才通過。驗收 agent 抓到的錯：
+- 報告寫會員生日「只會從 1900-01-01 補成真實日期」，實際 19 人中有 5 人是真實日期被改成 1900；照原說法設計 SCD2 會被誤導。
+- 證明「`Z` 結尾是 UTC」的測試方向用反（加 8 小時只能否證另一種格式），改以 base 重複列中不同格式字串解析為同一時刻為證據。
+- 報告把 day1→day2 的 25 個 order_id 寫成「正常的狀態更新」，實際是 day1 cancelled、day2 送來較舊的 paid；照檔案順序取最新會把已取消的訂單改回已付款。
+- 一條前提尚未由使用者判斷的違反被列為「確定的 noise」，移回需判斷。
+
+同一份剖析也發現 AI 先前寫的 `notes/dataset/dictionary.md` 把產品價格範圍算成 10,000～99,000，是字串比大小的錯誤，正確是 3,000～199,000（尚未改 dictionary.md）。
+
+- 依據：commit `1a3ce9f`；`part_a/source-schema-inference.md`、`part_a/profiling/profile_sources.py`
