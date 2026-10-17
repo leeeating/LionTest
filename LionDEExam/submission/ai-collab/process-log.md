@@ -235,3 +235,9 @@ AI 算出 base 的 completed 有 28,612 列（base 的 28.6%）出發日都還�
 使用者問「只出現在撞號列，不能當證據」與「剛好等於隨機抽樣的期望值，兩邊統計上無關」是什麼意思。AI 說明撞號列各欄和 base 相同的程度，等於兩疊不相干的訂單隨機配對，並重算了精確的期望值對照（幣別、通路、狀態都落在隨機期望附近，會員、金額、下單時間相同 0 列）。使用者決定「把撞號當 noise 處理」，理由是「先假設訂單狀態不能被改寫」。AI 起草時把這句解讀成「會員、下單時間、金額不可改」並寫成使用者的前提，被驗收 agent 指出是擴寫（照字面「狀態不能改」會與 paid → cancelled 衝突）；AI 改成請使用者確認，使用者確認原意是訂單內容不能被改寫、狀態可以變。這與官方 README「增量含舊訂單的狀態更新」的說法不同。見 ADR-03。
 
 - 依據：commit `3eb7f7a`；ADR-03
+
+### 2026-10-17｜Part A｜狀態機定案：created 不能直接跳到 completed
+
+狀態機最後一題「有沒有 created → completed 的直接跳轉（例如現場付款的票券）」，使用者決定：「我先假設不行」。至此狀態機的規則都以使用者的假設定下：單向不可恢復、completed 是出團完成、completed 後不能取消、completed 必須先經過 paid。合法轉移只剩 created → paid、created → cancelled、paid → cancelled、paid → completed。
+
+- 依據：commit `802eeb6`；`notes/part_a/order-state-machine.md`
