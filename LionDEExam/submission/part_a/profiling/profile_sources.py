@@ -609,6 +609,54 @@ WITH g AS (SELECT src, order_id, count(*) AS c,
 SELECT count(*) AS n_groups, sum(CASE WHEN dm = 1 AND da = 1 AND dc = 1 AND dp = 1 THEN 1 ELSE 0 END) AS four_cols_same
 FROM g
 """)
+q("S8.dup_group_col_diff", "三類同 order_id 多列的組：逐欄「組內值不只一種」的組數（下單時間以解析後時刻 co_ts 比較）", """
+WITH grp AS (
+  SELECT 'a_inc_same_file' AS kind, src AS k1, order_id FROM orders_t WHERE src <> 'base'
+    GROUP BY src, order_id HAVING count(*) > 1
+  UNION ALL
+  SELECT 'b_day1_to_day2_not_in_base', 'day1_day2', order_id FROM orders_t
+    WHERE src IN ('day1', 'day2') AND order_id NOT IN (SELECT order_id FROM orders_base)
+    GROUP BY order_id HAVING count(DISTINCT src) = 2
+  UNION ALL
+  SELECT 'c_base_same_id', 'base', order_id FROM orders_t WHERE src = 'base'
+    GROUP BY order_id HAVING count(*) > 1),
+rows AS (
+  SELECT g.kind, g.k1, o.* FROM grp g JOIN orders_t o ON o.order_id = g.order_id
+    AND ((g.kind = 'a_inc_same_file' AND o.src = g.k1)
+      OR (g.kind = 'b_day1_to_day2_not_in_base' AND o.src IN ('day1', 'day2'))
+      OR (g.kind = 'c_base_same_id' AND o.src = 'base'))),
+d AS (
+  SELECT kind, k1, order_id,
+    count(DISTINCT member_id) AS member_id, count(DISTINCT product_id) AS product_id, count(DISTINCT channel) AS channel,
+    count(DISTINCT order_status) AS order_status, count(DISTINCT quantity) AS quantity, count(DISTINCT currency) AS currency,
+    count(DISTINCT amount) AS amount, count(DISTINCT coupon_discount) AS coupon_discount, count(DISTINCT co_ts) AS order_created_at,
+    count(DISTINCT departure_date) AS departure_date, count(DISTINCT updated_at) AS updated_at
+  FROM rows GROUP BY kind, k1, order_id)
+SELECT kind, count(*) AS n_groups,
+  sum(CASE WHEN member_id > 1 THEN 1 ELSE 0 END) AS member_id, sum(CASE WHEN product_id > 1 THEN 1 ELSE 0 END) AS product_id,
+  sum(CASE WHEN channel > 1 THEN 1 ELSE 0 END) AS channel, sum(CASE WHEN order_status > 1 THEN 1 ELSE 0 END) AS order_status,
+  sum(CASE WHEN quantity > 1 THEN 1 ELSE 0 END) AS quantity, sum(CASE WHEN currency > 1 THEN 1 ELSE 0 END) AS currency,
+  sum(CASE WHEN amount > 1 THEN 1 ELSE 0 END) AS amount, sum(CASE WHEN coupon_discount > 1 THEN 1 ELSE 0 END) AS coupon_discount,
+  sum(CASE WHEN order_created_at > 1 THEN 1 ELSE 0 END) AS order_created_at,
+  sum(CASE WHEN departure_date > 1 THEN 1 ELSE 0 END) AS departure_date, sum(CASE WHEN updated_at > 1 THEN 1 ELSE 0 END) AS updated_at
+FROM d GROUP BY kind ORDER BY kind
+""")
+q("S8.dup_group_col_diff_clean", "同上，但 (a) 類只取四欄（member/amount/created/product）一致的組（即 S8.inc_dup_consistent 的 45 組）", """
+WITH g AS (SELECT src, order_id FROM orders_t WHERE src <> 'base' GROUP BY src, order_id
+           HAVING count(*) > 1 AND count(DISTINCT member_id) = 1 AND count(DISTINCT amount) = 1
+              AND count(DISTINCT co_ts) = 1 AND count(DISTINCT product_id) = 1),
+d AS (SELECT o.src, o.order_id,
+    count(DISTINCT channel) AS channel, count(DISTINCT order_status) AS order_status, count(DISTINCT quantity) AS quantity,
+    count(DISTINCT currency) AS currency, count(DISTINCT coupon_discount) AS coupon_discount,
+    count(DISTINCT departure_date) AS departure_date, count(DISTINCT updated_at) AS updated_at
+  FROM orders_t o JOIN g ON o.src = g.src AND o.order_id = g.order_id GROUP BY o.src, o.order_id)
+SELECT count(*) AS n_groups,
+  sum(CASE WHEN channel > 1 THEN 1 ELSE 0 END) AS channel, sum(CASE WHEN order_status > 1 THEN 1 ELSE 0 END) AS order_status,
+  sum(CASE WHEN quantity > 1 THEN 1 ELSE 0 END) AS quantity, sum(CASE WHEN currency > 1 THEN 1 ELSE 0 END) AS currency,
+  sum(CASE WHEN coupon_discount > 1 THEN 1 ELSE 0 END) AS coupon_discount,
+  sum(CASE WHEN departure_date > 1 THEN 1 ELSE 0 END) AS departure_date, sum(CASE WHEN updated_at > 1 THEN 1 ELSE 0 END) AS updated_at
+FROM d
+""")
 q("S8.status_transitions", "狀態轉移（依 updated_at 排序的相鄰兩列，所有來源合併）：倒退或終態後再變的轉移", """
 WITH s AS (SELECT src, order_id, order_status, upd_ts, member_id,
     lag(order_status) OVER (PARTITION BY order_id ORDER BY upd_ts, src) AS prev_status,

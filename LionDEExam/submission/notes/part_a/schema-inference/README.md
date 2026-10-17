@@ -8,7 +8,7 @@
 
 把 7 個 CSV 當成「上游營運 DB 匯出來的東西」，反推原本的資料表長什麼樣：訂單表一張單一列（目前狀態），會員表一人一列（members.csv 是它在某天的萃取），產品、匯率是主檔。
 
-推法很單純：**多數值＝原始定義，違反者＝noise 候選**。例如 99.9% 的 amount 都是正數，就推原表有 `CHECK (amount > 0)`，那 50 筆負數就列為違反。違反再分三類：確定的錯誤值、未知值的哨兵（-1、N/A、1900-01-01）、可能合法的業務狀況；資料推不出來的列為「待使用者判斷」。
+推法很單純：**多數值＝原始定義，違反者＝noise 候選**（noise＝題目刻意埋進資料的錯誤值）。例如 99.9% 的 amount 都是正數，就推原表有 `CHECK (amount > 0)`，那 50 筆負數就列為違反。違反再分三類：確定的錯誤值、未知值的哨兵（-1、N/A、1900-01-01）、可能合法的業務狀況；資料推不出來的列為「待使用者判斷」。
 
 ## 最重要的 3 個發現
 
@@ -31,10 +31,10 @@
 
 - 腳本：`LionDEExam/submission/part_a/profiling/profile_sources.py`（PySpark 4.2.0）。在 repo 根目錄執行：
   `uv run python -I LionDEExam/submission/part_a/profiling/profile_sources.py`
-- 每段檢查以 `[Sx.名稱]` 標籤印出 SQL 原文與輸出。細節檔每個數字都附標籤，可在 stdout 用標籤搜尋到原始輸出。
+- 每段檢查以 `[Sx.名稱]` 形式的標籤印出 SQL 原文與輸出。每段末尾的「證據」是剖析腳本輸出中的搜尋標籤，可用來找到該數字的原始查詢與結果。
 - **所有欄位以字串讀入**（`inferSchema=false`），型別轉換一律用 `try_cast`、`try_to_timestamp`、`try_to_date`，轉不過的算「無法轉換」，不讓 Spark 報錯也不悄悄變 NULL。
 - 查詢建立在三個 view 上（定義也印在 stdout）：`orders_all`（四個訂單檔 union，加 `src`、`batch_date`）、`orders_t`（解析後欄位：`co_ts`、`upd_ts`、`dep_dt`、`amount_d`、`qty_i`、`coupon_d`、`co_fmt`）、`orders_ratio`（加上產品定價與同日匯率，見 [order-amount.md](order-amount.md)）。
-- Spark 讀 CSV 時 BOM 已自動略過：`[S0]` 印出的第一欄名稱是 `'order_id'`，沒有多一個看不見的字元；七個檔都有 BOM（`BOM=True`），讀到的列數＝檔案行數−1。
+- Spark 讀 CSV 時 BOM 已自動略過：標籤 `S0` 印出的第一欄名稱是 `'order_id'`，沒有多一個看不見的字元；七個檔都有 BOM（`BOM=True`），讀到的列數＝檔案行數−1。
 
 ## 時區設定
 
