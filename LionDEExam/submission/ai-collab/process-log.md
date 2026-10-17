@@ -247,3 +247,9 @@ AI 算出 base 的 completed 有 28,612 列（base 的 28.6%）出發日都還�
 使用者先指出選事實表型態「還是要照業務邏輯看吧」。AI 找到題目內的業務需求線索：模組 E 的問數題都以訂單為單位（營收、取消率、狀態比例），模組 E 的迷你資料倉 fact_order 是一張訂單一列、存目前狀態。使用者也問「我在part a用的心力是不是有點多」，AI 估計 Part A 已花約 8～10 小時（題目建議 4～5 小時），A-1、A-2 程式碼仍是 0，建議剩下的決策加速、文件不再反覆打磨。使用者決定：「模組E是常見的業務情境 所以可以參考e來設計fact」。見 ADR-04。
 
 - 依據：commit `e1dcd82`；ADR-04
+
+### 2026-10-17｜Part A｜增量新舊以 updated_at 判斷
+
+使用者問「照檔案順序是什麼意思」，AI 用 L4 那 25 組的例子（day1 cancelled、day2 送來 `updated_at` 較舊的 paid）說明：照檔案順序最新狀態是 paid，照 `updated_at` 是 cancelled。使用者決定：「照 updated_at，符合狀態機單向假設」。
+
+- 依據：commit `7847045`；`notes/part_a/schema-inference/order-time.md` J6
