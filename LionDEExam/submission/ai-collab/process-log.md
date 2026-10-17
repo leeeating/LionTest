@@ -187,3 +187,15 @@ AI 派 agent 用 PySpark 逐檔逐欄剖析 CSV、推測原始 schema（`notes/p
 同一份剖析也發現 AI 先前寫的 `notes/dataset/dictionary.md` 把產品價格範圍算成 10,000～99,000，是字串比大小的錯誤，正確是 3,000～199,000。這是 AI 第二次犯同類錯（第一次是 Part B 統計 amount，見 `part_b/evidence.md` E9 的「AI 自查」）。之後使用者問「dictionary.md 那個錯」，原意是問錯在哪，AI 誤解成要修正，直接改了 dictionary.md 並 commit（`83c58df`，經獨立重算確認數字正確）；使用者看過說明後決定保留。
 
 - 依據：commit `1a3ce9f`；`notes/part_a/schema-inference/`、`part_a/profiling/profile_sources.py`
+
+### 2026-10-17｜Part A｜逐欄比對推翻「45 組是乾淨的狀態更新」
+
+使用者認為 schema 推測報告「是一個不錯的觀察 但呈現方式不便於理解」，要求拆成分層筆記（`notes/part_a/schema-inference/`），之後又指出句中的證據標籤「這種描述比較難懂」，改成段末證據行。改寫過程中，驗收 agent 抓到「只改狀態」這個說法沒有證據：原報告寫增量同檔重複的 45 組是「乾淨的狀態更新」，但當時的查詢只檢查會員、金額、下單時間、產品四欄一致，沒查狀態。AI 先改措辭兩次仍被驗收退回（其中一次是 AI 在派工範例裡自己寫了「只有狀態在變」），依「同一修法連錯兩次就停」改成補查詢：逐欄比對三類重複組。結果 45 組連狀態都相同，只差 `updated_at`，是同狀態重送；資料裡同一張單、狀態真的有變的只有 day1→day2 的 25 組（就是 cancelled 被改回 paid 的那 25 組）。驗收 agent 以純 Python 獨立重算，數字一致。這個錯從原報告就存在，前三輪驗收都沒抓到。
+
+- 依據：commit `7328fc0`；`notes/part_a/schema-inference/order-identity.md` J1、J4
+
+### 2026-10-17｜Part A｜V7 base 重複列：使用者判斷是網路波動造成的重複寫入
+
+使用者看到 base 的 40 組重複只差 `updated_at` 2～29 秒，判斷：「v7根據我的經驗是網路波動導致的重複寫入 可以重寫入端或是schena的unique index改善」。AI 補充 unique index 建在哪取決於 J1（上游是一張單一列，還是狀態事件表），而 `(order_id, updated_at)` 唯一擋不住 V7；寫入端冪等鍵是網路重送的根本解法。上游改善與本次管線的去重是兩件事，A-3 可以分開寫。J1 尚未決定。
+
+- 依據：commit `7328fc0`；`notes/part_a/schema-inference/order-identity.md` V7
