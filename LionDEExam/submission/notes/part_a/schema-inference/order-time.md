@@ -74,7 +74,9 @@
 <sub>證據：剖析輸出搜尋 `S8.inc_vs_inc`、`S8.inc_vs_inc_status_order`、`S8.inc_vs_inc_status_examples`、`S5.inc_upd_before_batch`（`id_in_day1 true`）</sub>
 
 <a id="j6"></a>
-## J6｜base 的萃取時點與增量的切分基準〔待使用者判斷〕
+## J6｜base 的萃取時點與增量的切分基準〔使用者判斷：照 updated_at〕
+
+- 〔使用者判斷〕增量同一張單的新舊以 `updated_at` 判斷，不看檔案到達順序。理由原話：「照 updated_at，符合狀態機單向假設」（照檔案順序，[L4](#l4) 的 25 組會變成 cancelled → paid，違反「取消後不能恢復」）。官方 README 也寫「以 updated_at 區分新舊」。
 
 L1、L2 顯示 base 與增量檔的 `updated_at` 都會超出檔名日期。增量切分要以「檔案」為準還是以 `updated_at` 為準、base 是否已含 07-01～07-03 的更新，需要使用者決定解讀（影響「以 updated_at 判斷新舊」的可靠度：12 列增量列比 base 同 id 列還舊）。另一個直接受影響的例子是 [L4](#l4)：25 個 id 依兩種基準會得到不同的最終狀態。
 

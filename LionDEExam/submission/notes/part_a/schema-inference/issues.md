@@ -31,7 +31,7 @@ noise＝題目刻意埋進資料的錯誤值。編號沿用原報告（V＝違�
 | L2 | base 有 `updated_at` 落在 07-01～07-03 的列 | 2,265 列 | 可能合法 | [L2](order-time.md#l2) |
 | L3 | day2 有 base 沒有的晚到新單 | 60 列 | 可能合法 | [L3](order-time.md#l3) |
 | L4 | day1→day2 再出現的 id，day2 送來的是較舊事件 | 25 個 id | 可能合法 | [L4](order-time.md#l4) |
-| J6 | 新舊以檔案順序還是 `updated_at` 為準、base 萃取時點 | — | 待使用者判斷 | [J6](order-time.md#j6) |
+| J6 | 新舊以檔案順序還是 `updated_at` 為準、base 萃取時點 | — | 使用者判斷：照 updated_at | [J6](order-time.md#j6) |
 | L10 | completed 的訂單出發日都還沒到 | 28,612 列 | 可能合法 | [L10](order-time.md#l10) |
 | J8 | completed 的業務語意 | — | 待使用者判斷 | [J8](order-time.md#j8) |
 
