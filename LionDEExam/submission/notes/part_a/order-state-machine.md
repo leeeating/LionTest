@@ -1,6 +1,6 @@
-# 訂單狀態機（候選版）
+# 訂單狀態機
 
-官方 README 定義 `order_status` 有 4 個值：created、paid、completed、cancelled。本檔畫出這 4 個狀態之間可能的轉移，標明哪些有資料證據、哪些要靠業務判斷。**還沒定案**：下方「待決定」三題（第 1 題就是 ⑤）由使用者判斷。
+官方 README 定義 `order_status` 有 4 個值：created、paid、completed、cancelled。本檔畫出這 4 個狀態之間可能的轉移，標明哪些有資料證據、哪些要靠業務判斷。下方「待決定」三題都已由使用者以假設定下（見各題〔使用者判斷〕）；這些假設題目沒有說明，若業務規則不同要回頭修正。
 
 ## 前提假設〔使用者判斷〕
 **訂單流程單向：取消後不能恢復。** 使用者原話：「那先簡單假設不能恢復」（process-log「假設訂單流程單向：取消後不能恢復」）。題目沒有說明這條業務規則，是本專案的假設。若業務允許恢復，fact_order 的型態與上游唯一鍵都要重新考慮（見 [`learning/1-modeling/fact-table-types.md`](../../learning/1-modeling/fact-table-types.md)）。
@@ -44,5 +44,5 @@
 
 ## 待決定
 1. ~~⑤ completed → cancelled 存在嗎？例如出團後才申請取消退款。~~ 〔使用者判斷〕先假設**不存在**：completed 之後不能取消（原話：「先假設completed後不能取消」）。資料裡的 completed → cancelled 只出現在撞號列（會員、金額、下單時間都不同），不是同一張單的歷程。
-2. 有沒有 created → completed 的直接跳轉？例如現場付款的票券。
+2. ~~有沒有 created → completed 的直接跳轉？例如現場付款的票券。~~ 〔使用者判斷〕先假設**不行**：completed 一定要先經過 paid（原話：「我先假設不行」）。
 3. ~~`completed` 是指「出團完成」還是「交易完成」？~~ 〔使用者判斷〕先假設是**出團完成**（原話：「completed先假設成出團完成」）。**與資料衝突，待處理**：base 的 completed 全部在出發日之前（增量檔中只有與 base 撞號的 completed 列才有出發日已過的情形）（見 [schema-inference/order-time.md](schema-inference/order-time.md) 的 J8），照這個假設，completed 應該在出發日之後才出現，但 base 的 completed 共 28,612 列（base 100,040 列的 28.6%），出發日全部晚於 `updated_at` 的日期，這些列在此假設下都不合理（已排除時區：`updated_at` 全是 `+08:00`，出發日比更新日晚 4～119 天，中位數 62 天）。〔使用者判斷〕假設不變，這些列當資料品質問題處理，理由：「先把狀態規則定下來 之後比較好處理」。怎麼處理尚未決定。
