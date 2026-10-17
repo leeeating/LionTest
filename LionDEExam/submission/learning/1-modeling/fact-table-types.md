@@ -106,8 +106,8 @@ show("坑：直接 SUM(amount)，(交易事件全部, 只取 created, 定期快�
 - **累積快照的 UPDATE 也要冪等**：以業務生效時間為準時，晚到的舊事件（見 [time-varying-attributes.md](time-varying-attributes.md)「兩種時間」）不能蓋掉較新的里程碑。
 
 ## 本專案出處
-- 官方 README：「增量檔中同一 order_id 可能出現多次（狀態更新事件），以 updated_at 區分新舊」，原料本身就是交易事件形狀；彙整見 `part_a/source-schema-inference.md`「支持 `order_id`（一張單一列，增量為狀態更新）」。
-- `part_a/source-schema-inference.md` L4：day1 cancelled、day2 paid 的 25 個 id：照到達順序與照 `updated_at` 更新會得到相反的最終狀態，以哪個為準見 J6（待使用者決定）。
+- 官方 README：「增量檔中同一 order_id 可能出現多次（狀態更新事件），以 updated_at 區分新舊」，原料本身就是交易事件形狀；彙整見 [`notes/part_a/schema-inference/order-identity.md`](../../notes/part_a/schema-inference/order-identity.md#j1) J1「支持 `order_id`（一張單一列，增量為狀態更新）」。
+- [`notes/part_a/schema-inference/order-time.md`](../../notes/part_a/schema-inference/order-time.md#l4) L4：day1 cancelled、day2 paid 的 25 個 id：照到達順序與照 `updated_at` 更新會得到相反的最終狀態，以哪個為準見 J6（待使用者決定）。
 
 ## 官方文件
 - Kimball Group（已讀）：[Transaction Fact Tables](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/transaction-fact-table/)：一列是「某時某地的一個量測事件」，只在有事件時才有列。

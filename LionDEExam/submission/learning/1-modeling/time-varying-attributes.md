@@ -106,7 +106,7 @@ print("-- 照 updated_at 取最新:", con.sql("SELECT order_id, arg_max(status, 
 - `members.csv` 是定期快照（`extract_date` 不同），是有效期間的原料，見 [scd.md](scd.md)「本專案」。
 - `part_b/code-review.md` #7：`build_fact` 中的 `converted.join(members, "member_id", "left")` 直接 join 原始快照，改 join `dim_member` 並用半開區間。
 - `part_b/appendix.md`「SCD2 初始載入」（報告 #6 (c) 的補充）：回填歷史與第一版 `valid_from`。
-- 兩種時間：`part_a/source-schema-inference.md` 的 L4、J6。增量檔 day1→day2 有 25 個 order_id，day2 送來的 `paid` 其 `updated_at` 比 day1 的 `cancelled` 舊（例 `ORD00100020`：day1 cancelled 07-04T18:08:26、day2 paid 07-03T12:08:26）；照檔案順序與照 `updated_at` 得到相反的最終狀態。採用哪一種是 J6 待使用者決定的解讀。範例第 3 段即以此為原型。
+- 兩種時間：[`notes/part_a/schema-inference/order-time.md`](../../notes/part_a/schema-inference/order-time.md#l4) 的 L4、J6。增量檔 day1→day2 有 25 個 order_id，day2 送來的 `paid` 其 `updated_at` 比 day1 的 `cancelled` 舊（例 `ORD00100020`：day1 cancelled 07-04T18:08:26、day2 paid 07-03T12:08:26）；照檔案順序與照 `updated_at` 得到相反的最終狀態。採用哪一種是 J6 待使用者決定的解讀。範例第 3 段即以此為原型。
 
 ## 官方文件
 - DuckDB ASOF JOIN（已讀）：https://duckdb.org/docs/current/guides/sql_features/asof_join.html 。每個左列最多配一個右列：同鍵中時間 ≤ 左列的最近一筆；`ASOF JOIN` 丟掉無匹配列，`ASOF LEFT JOIN` 補 NULL；`USING` 寫法時不等式必須是 `>=` 且放最後。

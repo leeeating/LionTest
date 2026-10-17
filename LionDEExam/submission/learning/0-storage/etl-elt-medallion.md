@@ -103,7 +103,7 @@ gold_daily 2
 
 ## 本專案出處
 - `decisions/ADR-02-source-abstraction-schema-contract.md`：營運 SQL DB → CSV 匯出的脈絡、「約束只能擋不能修」、先隔離再寫入有約束的表；process-log 事件「管線以抽象來源設計，品質規則寫成 schema 合約」。
-- `part_a/source-schema-inference.md`：view `orders_all`（四檔 union，加 `src`、`batch_date`）就是 bronze 的形狀；推測的上游 `CREATE TABLE orders` 說明 CSV 來自營運 DB。
+- `notes/part_a/schema-inference/`（[README](../../notes/part_a/schema-inference/README.md)、[schema.md](../../notes/part_a/schema-inference/schema.md)）：view `orders_all`（四檔 union，加 `src`、`batch_date`）就是 bronze 的形狀；推測的上游 `CREATE TABLE orders` 說明 CSV 來自營運 DB。
 
 ## 官方文件
 - ETL vs ELT、何時選哪個（Azure Architecture Center）：https://learn.microsoft.com/en-us/azure/architecture/data-guide/relational-data/etl

@@ -71,7 +71,7 @@ first column names: b'order_id' b'order_id'
 
 ## 本專案出處
 - `decisions/ADR-01-execution-engine.md`：三個選項（DuckDB、PySpark＋Delta、pandas）的取捨；process-log 事件「Part A 執行引擎選 PySpark＋Delta」。
-- `part_a/profiling/profile_sources.py`：用 PySpark 全字串讀 CSV（`.option("mode", "FAILFAST")`）；`part_a/source-schema-inference.md` 記錄 Spark 讀 CSV 時 BOM 已自動略過。
+- `part_a/profiling/profile_sources.py`：用 PySpark 全字串讀 CSV（`.option("mode", "FAILFAST")`）；`notes/part_a/schema-inference/README.md` 記錄 Spark 讀 CSV 時 BOM 已自動略過。
 
 ## 官方文件
 - DuckDB 是 in-process、沒有 server：https://duckdb.org/why_duckdb
