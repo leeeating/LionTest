@@ -14,6 +14,8 @@
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
 |---|---|---|---|
 | Data lake、warehouse、lakehouse：資料存成什麼形式 | 📄 [data-lake-vs-warehouse.md](0-storage/data-lake-vs-warehouse.md) | `buggy_pipeline.py` 的 `LAKEHOUSE`、`format("delta")` | B、C |
+| DuckDB vs Spark：引擎怎麼選、跟連 SQL DB 的差別 | 📄 [duckdb-vs-spark.md](0-storage/duckdb-vs-spark.md) | ADR-01 執行引擎 | A、C |
+| ETL／ELT 與 medallion（bronze／silver／gold） | 📄 [etl-elt-medallion.md](0-storage/etl-elt-medallion.md) | ADR-02、Part A 管線分層 | A-2、C |
 
 ### 1. 資料建模（Transformation／Data architecture）
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
@@ -52,7 +54,9 @@
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
 |---|---|---|---|
 | Spark ANSI 模式與隱式轉型 | ○ | Part B #1，pyspark 4.2 實跑 | B |
-| collect 到 driver、Python UDF vs 內建函式 | ○ | Part B #5、#10 | B、D（三選一模組） |
+| shuffle 與分區：什麼操作會搬資料、broadcast join、skew、目錄分區 | 📄 [shuffle-and-partitioning.md](5-spark/shuffle-and-partitioning.md) | Part B F3（依 `order_date` 分區的小檔） | A、B、D |
+| lazy evaluation 與執行計畫：`explain()`、Python UDF vs 內建函式 | 📄 [lazy-evaluation-and-query-plan.md](5-spark/lazy-evaluation-and-query-plan.md) | Part B #1 explain、#5 UDF | B、D |
+| collect 到 driver | ○ | Part B #10 | B、D（三選一模組） |
 
 ### 6. 工程實務（Software engineering／DataOps／Orchestration）
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
