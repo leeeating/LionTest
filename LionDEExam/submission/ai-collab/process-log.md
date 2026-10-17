@@ -259,3 +259,15 @@ AI 算出 base 的 completed 有 28,612 列（base 的 28.6%）出發日都還�
 AI 列出金額處理的四個子題與建議：原幣別金額與換算後 TWD 都存、匯率用下單日（台北日期；fx 涵蓋 04-28～07-03，每天都有 USD、JPY）、TWD 匯率固定為 1（fx 沒有 TWD，Part B 的 inner join 因此丟掉 TWD 訂單）、NTD（200 筆）當成 TWD（金額比值與 TWD 幾乎相同，V4）。使用者接受，理由：「原幣別保留可追溯，換算 TWD 讓營收能直接加總」。負數金額與疑似多乘 1,000 的列留到 A-3 一起決定。
 
 - 依據：commit `fb9736a`；`notes/part_a/schema-inference/order-amount.md` V4
+
+### 2026-10-17｜Part A｜dim_member 同日矛盾的 30 位取較高等級
+
+AI 查到同日矛盾的 30 位會員全部發生在第一次快照（04-30），都沒有更早的版本，建議等級標「未知」。使用者決定取較高的等級（一般 < 銀卡 < 金卡 < 白金），理由：「使用等級高的 不要影響會員權益」。AI 提醒 dim_member 是分析用、不發放權益；使用者修正理由為「假設會員系統也是同樣的行為才選擇的行為」，即假設上游會員系統遇到同日矛盾也取較高等級，資料倉與之一致。
+
+- 依據：commit `355733d`；`notes/part_a/schema-inference/members.md` V8、J7
+
+### 2026-10-17｜Part A｜dim_member SCD2 規則
+
+AI 先用一位會員的三次快照示範 SCD2 版本表；使用者問「member只有一個怎麼是快照」，AI 說明 `members.csv` 用 `extract_date` 分成三批（04-30 全量 8,030 列、05-31 459 列、06-30 502 列），使用者理解為「增量都在同一個檔」。AI 補充與訂單增量的差別：會員增量放的是完整樣子、不一定有變，沒出現不代表刪除。使用者接受三項建議：第一版 `valid_from` 用 `register_date`；等級、城市用 SCD2，姓名、生日直接覆寫（Type 1）；city `N/A`、生日 1900-01-01 轉 NULL，且不能蓋掉已知的真實生日。理由：「新會員訂單要對得到版本，更正不算歷史，假值不能蓋真值」。
+
+- 依據：commit `355733d`；`notes/part_a/schema-inference/members.md` V8、J7、J9
