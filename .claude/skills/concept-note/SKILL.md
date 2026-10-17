@@ -1,6 +1,6 @@
 ---
 name: concept-note
-description: 在討論中挑出可帶到其他專案的 SWE 觀念（套件／工具用法、SQL 寫法與模式），提出 3～5 個選項讓使用者選，再為選中的觀念寫一份約一頁的觀念筆記到 LionDEExam/submission/learning/。使用者問「哪些觀念適合記錄」「哪些值得記下來」「記成觀念筆記」「把這個寫成筆記」時觸發。
+description: 在討論中挑出可帶到其他專案的 SWE 觀念（套件／工具用法、SQL 寫法與模式），提出 3～5 個選項讓使用者選，再為選中的觀念寫一份約一頁的觀念筆記到 LionDEExam/submission/learning/ 下對應分類的子資料夾。使用者問「哪些觀念適合記錄」「哪些值得記下來」「記成觀念筆記」「把這個寫成筆記」時觸發。
 ---
 
 本專案自寫。這個 skill 取代先前改寫自 mattpocock/skills 的 `teach`（多 session 的 mission、課綱、學習紀錄、測驗流程）。取代原因是使用者看過 teach 之後的說明（原話）：「我覺得我們的方式應該是再討論的過程中問你 哪些觀念適合記錄下來成文件 然後你在提供一些選項 我選擇後你紀錄一份簡單的文間說明這個觀念 我偏向套件的使用或是sql等 那些可以套用在其他專案的swe技能」。
@@ -22,7 +22,7 @@ description: 在討論中挑出可帶到其他專案的 SWE 觀念（套件／�
 
 ## 筆記位置與格式
 
-位置：`LionDEExam/submission/learning/<kebab-case 觀念名>.md`，約一頁。建議結構：
+位置：`LionDEExam/submission/learning/<分類子資料夾>/<kebab-case 觀念名>.md`（分類見 README 地圖，如 `1-modeling/`；沒有對應子資料夾就新建，命名 `<編號>-<英文短名>`），約一頁。建議結構：
 
 ```markdown
 # <觀念名稱>

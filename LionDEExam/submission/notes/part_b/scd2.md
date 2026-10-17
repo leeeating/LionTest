@@ -1,6 +1,6 @@
 # 這份程式的 SCD2 錯在哪
 
-回到入口：[README.md](README.md)。SCD2 概念（三件事、初始載入、第一版 `valid_from`）看 [../../learning/scd.md](../../learning/scd.md)，本檔只講這一題。
+回到入口：[README.md](README.md)。SCD2 概念（三件事、初始載入、第一版 `valid_from`）看 [../../learning/1-modeling/scd.md](../../learning/1-modeling/scd.md)，本檔只講這一題。
 
 ## 這份程式的問題
 

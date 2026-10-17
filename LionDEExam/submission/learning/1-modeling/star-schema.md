@@ -21,7 +21,7 @@ dim_member ── fact_order ── dim_product
 2. **度量（measure）：fact 裡放哪些數字、能不能加總。** 金額、數量可以跨任何維度加總（additive）；餘額、庫存這類可以跨會員、產品加總，但不能跨時間加總（semi-additive，把每天的餘額加起來沒有意義）；單價、比率完全不能直接加總（non-additive）。多幣別的金額要先統一成同一種幣別，否則 `SUM` 沒有意義。
 3. **維度鍵：fact 用什麼鍵指向 dim。**
    - **自然鍵（natural key）**：來源系統本來的編號，例如 `member_id`。
-   - **代理鍵（surrogate key）**：倉儲自己產生的流水號，例如 `member_sk`。dim 用 SCD2 保留歷史時，同一個 `member_id` 會有多列，要指到「某一個版本」，最簡單、最常見的做法是代理鍵：單一欄位、跟來源系統的編號脫鉤。fact 寫入時就存當時版本的代理鍵，查詢時直接 join，不必再比對時間區間。替代做法是 fact 只存自然鍵，查詢時用 `(member_id, valid_from)` 這類複合鍵依時間區間對版本，見 [point-in-time-join.md](point-in-time-join.md)。
+   - **代理鍵（surrogate key）**：倉儲自己產生的流水號，例如 `member_sk`。dim 用 SCD2 保留歷史時，同一個 `member_id` 會有多列，要指到「某一個版本」，最簡單、最常見的做法是代理鍵：單一欄位、跟來源系統的編號脫鉤。fact 寫入時就存當時版本的代理鍵，查詢時直接 join，不必再比對時間區間。替代做法是 fact 只存自然鍵，查詢時用 `(member_id, valid_from)` 這類複合鍵依時間區間對版本，見 [time-varying-attributes.md](time-varying-attributes.md)。
    - **日期維度**常用 `20260610` 這種整數當鍵，一天一列、事先產生好，放月份、星期、是否假日等欄位。
 4. **退化維度（degenerate dimension）**：像 `order_id` 這種只有編號、沒有其他描述可放的鍵，直接留在 fact 裡，不另開維度表。
 
@@ -95,7 +95,7 @@ M001 的 5 月訂單算在普卡、6 月訂單算在金卡：因為 fact 存的�
 ## 本專案出處
 - 題目 A-1：設計 `fact_order`、`dim_member`（SCD2）、`dim_product`、`dim_date`，並說明粒度、金額處理、維度鍵設計。這三項是 Part A 要由我決定、寫 ADR 的地方，本筆記只講觀念。
 - `buggy_pipeline.py`：寫出 `dim/dim_member`、`fact/fact_order`，`build_fact()` 的 `converted.join(members, "member_id", "left")`。
-- 相關筆記：[scd.md](scd.md)（維度歷史）、[point-in-time-join.md](point-in-time-join.md)（fact 只存自然鍵時，怎麼對到當時的版本）。
+- 相關筆記：[scd.md](scd.md)（維度歷史）、[time-varying-attributes.md](time-varying-attributes.md)（fact 只存自然鍵時，怎麼對到當時的版本）。
 
 ## 官方文件
 未證實：這次沒有讀原始文獻，內容是 Kimball 維度建模的一般說法；「其他形狀與建模方法」中 Inmon、Data Vault、OBT 同樣是一般知識。

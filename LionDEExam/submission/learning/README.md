@@ -13,22 +13,24 @@
 ### 0. 儲存與架構（Storage）
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
 |---|---|---|---|
-| Data lake、warehouse、lakehouse：資料存成什麼形式 | 📄 [data-lake-vs-warehouse.md](data-lake-vs-warehouse.md) | `buggy_pipeline.py` 的 `LAKEHOUSE`、`format("delta")` | B、C |
+| Data lake、warehouse、lakehouse：資料存成什麼形式 | 📄 [data-lake-vs-warehouse.md](0-storage/data-lake-vs-warehouse.md) | `buggy_pipeline.py` 的 `LAKEHOUSE`、`format("delta")` | B、C |
 
 ### 1. 資料建模（Transformation／Data architecture）
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
 |---|---|---|---|
-| SCD：維度歷史怎麼保存（Type 0～4、6） | 📄 [scd.md](scd.md) | Part B #6 `update_dim_member` | A-1 指定 SCD2、B |
-| point-in-time join：對到「當時」的維度版本 | 📄 [point-in-time-join.md](point-in-time-join.md) | Part B #6、#7 | A-1、B |
+| SCD：維度歷史怎麼保存（Type 0～4、6） | 📄 [scd.md](1-modeling/scd.md) | Part B #6 `update_dim_member` | A-1 指定 SCD2、B |
+| 有時效性的屬性：快照／變更紀錄／有效期間、業務時間 vs 系統時間、point-in-time join | 📄 [time-varying-attributes.md](1-modeling/time-varying-attributes.md) | Part B #6、#7；增量檔 day1→day2 的 25 張訂單 | A-1、A-2、B |
 | join 一對多膨脹：join 前先確認 key 唯一 | ○ | Part B #7 `converted.join(members, "member_id", "left")` | A-1、A-2、B |
-| 星型模型：fact／dim、度量、代理鍵、日期維度 | 📄 [star-schema.md](star-schema.md) | `buggy_pipeline.py` 的 `dim/dim_member`、`fact/fact_order` | A-1 |
-| 事實表粒度：一列代表什麼（事件 vs 訂單） | 📄 [star-schema.md](star-schema.md) | `notes/dataset/dictionary.md` 總覽表的「粒度」欄 | A-1 |
+| 星型模型：fact／dim、度量、代理鍵、日期維度 | 📄 [star-schema.md](1-modeling/star-schema.md) | `buggy_pipeline.py` 的 `dim/dim_member`、`fact/fact_order` | A-1 |
+| 事實表粒度：一列代表什麼（事件 vs 訂單） | 📄 [star-schema.md](1-modeling/star-schema.md) | `notes/dataset/dictionary.md` 總覽表的「粒度」欄 | A-1 |
+| 事實表三種型態：交易事件、定期快照、累積快照 | 📄 [fact-table-types.md](1-modeling/fact-table-types.md) | Part A 的 fact_order 粒度 | A-1 |
+| Ledger（帳本）：只新增、錯了用沖銷 | 📄 [ledger.md](1-modeling/ledger.md) | base 的負數金額（process-log「負數？？」事件） | A-3 |
 
 ### 2. 增量與冪等 ETL（Ingestion／Transformation）
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
 |---|---|---|---|
-| MERGE 冪等寫入：重跑結果不變 | 📄 [merge-idempotent-write.md](merge-idempotent-write.md) | Part B #9 `write_fact` 的 `mode("append")` | A-2、B |
-| 取每組最新一筆：事件型增量去重 | 📄 [latest-row-per-group.md](latest-row-per-group.md) | Part B #2 `clean_orders` | A-2、B |
+| MERGE 冪等寫入：重跑結果不變 | 📄 [merge-idempotent-write.md](2-incremental-etl/merge-idempotent-write.md) | Part B #9 `write_fact` 的 `mode("append")` | A-2、B |
+| 取每組最新一筆：事件型增量去重 | 📄 [latest-row-per-group.md](2-incremental-etl/latest-row-per-group.md) | Part B #2 `clean_orders` | A-2、B |
 | 晚到資料（late-arriving）：本該在前一批出現的資料晚到 | ○ | `notes/dataset/incremental.md`：day2 有 6 列 `updated_at` 早於批次日 | A-2 |
 | 增量檔的時間欄位與批次日不一致（約 70% `updated_at` 晚於批次日，原因未證實） | ○ | `notes/dataset/incremental.md` 的 `updated_at` 分布 | A-2 |
 
@@ -42,7 +44,7 @@
 ### 4. SQL 與查詢陷阱
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
 |---|---|---|---|
-| LEFT JOIN 後用 WHERE 過濾右表，會變成 INNER | ○ | [point-in-time-join.md](point-in-time-join.md) 的 ASOF 空窗 | A |
+| LEFT JOIN 後用 WHERE 過濾右表，會變成 INNER | ○ | [time-varying-attributes.md](1-modeling/time-varying-attributes.md) 的 ASOF 空窗 | A |
 | 型別：數字存成字串時的比較與排序 | ○ | AI 統計 amount 時把字串拿來比大小 | A-3 |
 | NULL 語意：`!=` 遇 NULL、null-safe 比較 `<=>`、把缺值當 0 | ○ | Part B #6 `eqNullSafe`、#5 `to_twd` 回傳 0.0 | A-3、B |
 
@@ -65,4 +67,4 @@
 
 ## 怎麼新增
 
-在討論中問 AI「哪些觀念適合記錄？」。AI 會列出 3～5 個選項，我選了之後，AI 寫一份筆記到這裡，並把地圖中對應的 ○ 改成 📄（新觀念就加進合適的分類）。規則見 `.claude/skills/concept-note/SKILL.md`。
+在討論中問 AI「哪些觀念適合記錄？」。AI 會列出 3～5 個選項，我選了之後，AI 寫一份筆記到這裡（新筆記放進對應分類的子資料夾，沒有就新建），並把地圖中對應的 ○ 改成 📄（新觀念就加進合適的分類）。規則見 `.claude/skills/concept-note/SKILL.md`。

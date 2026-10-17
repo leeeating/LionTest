@@ -9,7 +9,7 @@ SCD（**緩慢變化維度**）是「維度表裡的屬性改了，要怎麼處�
 - **Type 2**：`versions.append(...)`（list append），銀卡、金卡各一列、各有有效期間，5/15 答銀卡。
 - **Type 3**：多一欄 `previous_level`，只記「上一個」值，再早的就沒了。
 
-Type 2 怎麼 join 事實見 [point-in-time-join.md](point-in-time-join.md)；本題程式的 SCD2 錯在哪見 [這份程式的 SCD2 錯在哪](../notes/part_b/scd2.md)。
+Type 2 怎麼 join 事實見 [time-varying-attributes.md](time-varying-attributes.md)；本題程式的 SCD2 錯在哪見 [這份程式的 SCD2 錯在哪](../../notes/part_b/scd2.md)。
 
 ## Type 2 細節（沿用王小明的例子）
 兩版都留，各自標有效期間：
@@ -119,7 +119,7 @@ print(con.sql("""
 | surrogate key | 倉儲自己產生、無業務意義的代理鍵；Type 2 每個版本一個，事實表可存它來鎖定版本。 |
 | `valid_from`／`valid_to`／`is_current` | Type 2 的有效期間欄位：版本從何時起、到何時止（目前版本常填 `9999-12-31`）、是否為最新一版。 |
 | 半開區間 | `valid_from <= t < valid_to`，含起不含迄，邊界日只會落在一版，不會重複配對。 |
-| point-in-time join | 讓每筆事實對到它發生「當時」的維度版本，見 [point-in-time-join.md](point-in-time-join.md)。 |
+| point-in-time join | 讓每筆事實對到它發生「當時」的維度版本，見 [time-varying-attributes.md](time-varying-attributes.md)。 |
 | snapshot（快照）| 每次整批抄一份來源的當下全貌（如每月一份名冊）；它是 SCD2 的**原料**，不是 SCD2 本身。 |
 
 ## 比較表
@@ -133,7 +133,7 @@ print(con.sql("""
 | 6 | 完整＋目前值 | 同 Type 2，更新時要改整組舊列 | 兩種都簡單，但寫入較複雜 |
 
 ## 本專案出處
-`members.csv` 是多次快照（`extract_date` 不同），是做 Type 2 的原料；`buggy_pipeline` 的 `update_dim_member` 自稱 SCD2 卻做錯，見 [這份程式的 SCD2 錯在哪](../notes/part_b/scd2.md)。
+`members.csv` 是多次快照（`extract_date` 不同），是做 Type 2 的原料；`buggy_pipeline` 的 `update_dim_member` 自稱 SCD2 卻做錯，見 [這份程式的 SCD2 錯在哪](../../notes/part_b/scd2.md)。
 
 ## 官方文件
 - 已讀（Kimball Group, Dimensional Modeling Techniques）：[Type 0](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-0/)、[Type 1](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-1/)、[Type 2](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-2/)、[Type 3](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-3/)、[Type 4](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-4/)、[Type 6](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-6/)。
