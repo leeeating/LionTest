@@ -241,3 +241,9 @@ AI 算出 base 的 completed 有 28,612 列（base 的 28.6%）出發日都還�
 狀態機最後一題「有沒有 created → completed 的直接跳轉（例如現場付款的票券）」，使用者決定：「我先假設不行」。至此狀態機的規則都以使用者的假設定下：單向不可恢復、completed 是出團完成、completed 後不能取消、completed 必須先經過 paid。合法轉移只剩 created → paid、created → cancelled、paid → cancelled、paid → completed。
 
 - 依據：commit `802eeb6`；`notes/part_a/order-state-machine.md`
+
+### 2026-10-17｜Part A｜fact_order 粒度參考模組 E：一張訂單一列
+
+使用者先指出選事實表型態「還是要照業務邏輯看吧」。AI 找到題目內的業務需求線索：模組 E 的問數題都以訂單為單位（營收、取消率、狀態比例），模組 E 的迷你資料倉 fact_order 是一張訂單一列、存目前狀態。使用者也問「我在part a用的心力是不是有點多」，AI 估計 Part A 已花約 8～10 小時（題目建議 4～5 小時），A-1、A-2 程式碼仍是 0，建議剩下的決策加速、文件不再反覆打磨。使用者決定：「模組E是常見的業務情境 所以可以參考e來設計fact」。見 ADR-04。
+
+- 依據：commit `e1dcd82`；ADR-04
