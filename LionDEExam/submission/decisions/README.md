@@ -28,3 +28,4 @@
 |---|---|---|---|
 | [ADR-01](ADR-01-execution-engine.md) | Part A 執行引擎：PySpark＋Delta | A | 草稿 |
 | [ADR-02](ADR-02-source-abstraction-schema-contract.md) | 管線以抽象來源設計，品質規則寫成 schema 合約 | A | 草稿 |
+| [ADR-03](ADR-03-order-id-collision-as-noise.md) | 增量檔與 base 撞號的列當 noise 處理 | A | 草稿 |
