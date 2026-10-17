@@ -8,4 +8,5 @@
 |---|---|
 | Dataset：7 個 CSV 是什麼、怎麼連、有什麼怪處 | [dataset/README.md](dataset/README.md) |
 | Part A：從 CSV 推測原始 schema、違反清單與待判斷事項 | [part_a/schema-inference/README.md](part_a/schema-inference/README.md) |
+| Part A：訂單狀態機（候選版，含單向假設與待決定事項） | [part_a/order-state-machine.md](part_a/order-state-machine.md) |
 | Part B：buggy_pipeline.py 在做什麼、有哪些問題 | [part_b/README.md](part_b/README.md) |
