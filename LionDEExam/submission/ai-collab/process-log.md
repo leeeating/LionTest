@@ -199,3 +199,15 @@ AI 派 agent 用 PySpark 逐檔逐欄剖析 CSV、推測原始 schema（`notes/p
 使用者看到 base 的 40 組重複只差 `updated_at` 2～29 秒，判斷：「v7根據我的經驗是網路波動導致的重複寫入 可以重寫入端或是schena的unique index改善」。AI 補充 unique index 建在哪取決於 J1（上游是一張單一列，還是狀態事件表），而 `(order_id, updated_at)` 唯一擋不住 V7；寫入端冪等鍵是網路重送的根本解法。上游改善與本次管線的去重是兩件事，A-3 可以分開寫。J1 尚未決定。
 
 - 依據：commit `7328fc0`；`notes/part_a/schema-inference/order-identity.md` V7
+
+### 2026-10-17｜Part A｜不能用 demo 的變動量推論 prod 的狀態歷程
+
+討論 fact_order 的三種型態時，AI 把「demo 裡同一張單狀態真的有變的只有 25 組，狀態歷程很薄」列為選型態的相關事實。使用者指出：「你不能用demo來假設變動性不大啊」。這和 ADR-01 被指正的「demo 資料量不代表 prod」是同一類錯：demo 是合成資料，官方 README 也說增量檔「含新訂單與舊訂單的狀態更新事件」，正式環境的訂單本來就會經歷 created→paid→completed 等多次狀態變化。設計要以業務流程為準，demo 的分布只能當作資料品質的線索。
+
+- 依據：commit `a06b335`；`notes/part_a/order-state-machine.md`
+
+### 2026-10-17｜Part A｜假設訂單流程單向：取消後不能恢復
+
+討論 fact_order 的三種型態時，AI 說明累積快照能回答大部分問題，前提是每個里程碑對一張單只發生一次；若允許取消後恢復，`paid_at` 這類欄位會被覆蓋。使用者決定：「那先簡單假設不能恢復」。這個假設也讓唯一鍵 `(order_id, status)` 在上游事件表的情境下成立（同一狀態不會出現兩次）。
+
+- 依據：commit `a06b335`；`notes/part_a/order-state-machine.md`
