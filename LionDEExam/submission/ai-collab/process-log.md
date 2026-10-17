@@ -217,3 +217,9 @@ AI 派 agent 用 PySpark 逐檔逐欄剖析 CSV、推測原始 schema（`notes/p
 畫訂單狀態機時，AI 列出待決定的問題之一：completed 是「出團完成」還是「交易完成」。使用者決定：「completed先假設成出團完成」。AI 指出這與資料衝突：base 的 completed 全部在出發日之前（`notes/part_a/schema-inference/order-time.md` 的 L10、J8），照此假設這些列都不合理。要當成資料品質問題處理，還是修正假設，尚未決定。
 
 - 依據：commit `19df745`；`notes/part_a/order-state-machine.md`
+
+### 2026-10-17｜Part A｜completed 維持出團完成，28,612 列當資料品質問題
+
+AI 算出 base 的 completed 有 28,612 列（base 的 28.6%）出發日都還沒到，並提出兩條路：維持「出團完成」把這些列當資料品質問題，或改成「交易完成」讓資料合理；AI 也提到「近三成都錯，比較像語意不同」是推論。使用者先問「你不是說有時區問題」，AI 用時區正確解析重算：`updated_at` 全是 `+08:00`，出發日比更新日晚 4～119 天，時區最多只差 1 天，排除時區。使用者決定維持假設、當資料品質問題處理：「先把狀態規則定下來 之後比較好處理」。怎麼處理這些列尚未決定。
+
+- 依據：commit `4f23333`；`notes/part_a/order-state-machine.md`
