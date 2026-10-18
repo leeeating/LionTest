@@ -343,3 +343,11 @@ T5 開工前要先定一條規則：base 裡同一個 order_id 有多列（V7）
 使用者嫌 subagent 跑太久（T5 全套測試約 7 分鐘、本機與 UTC 各跑一次），問「測試怎麼會需要啟動pyspark 不能mock掉嗎」。AI 說明不能 mock：T3～T5 抓到的錯幾乎都是 Spark／Delta 本身的行為，例如 column pruning 讓 count() 漏算、轉型時悄悄四捨五入、Java regex 的 `$`、MERGE 的 E12、collect 時的時區換算，mock 掉就測不到。真正慢的是每條合成測試都走完整流程、寫 5 張 Delta 表（約 17 秒）。使用者再問「那寫入delta的邏輯有需要測試嗎」，AI 回答需要，但只限冪等、隔離表重跑、E12、updated_at 不倒退、當掉重跑這幾類，每類 1～2 條。使用者決定：「那就減少delta的使用」。轉換邏輯改成單獨測 DataFrame，從 T6 開始執行，T5 的合成測試一併改寫。
 
 - 依據：僅 process-log 記錄；策略寫在工作檔
+
+### 2026-10-18｜Part A｜狀態機檢查粒度：第二意見推翻 AI 建議的 B，AI 派工時把 L4 方向寫反
+
+T6 開工前要決定狀態機檢查要涵蓋哪些轉移：A 只比「既有 fact → 這批最新一列」，B 同批事件依 updated_at 逐段比。使用者先提出「應該作處domain來限制行為吧」，AI 建議 B。使用者問「為什麼會出現這種狀態轉移鍊」，AI 從上游分析根因：重送、亂序／晚到、時鐘不一致、上游沒有強制狀態機、多個系統各寫狀態、編號重用；根本解法是每張單帶版本號，並在上游強制狀態機。使用者要求「請另一個agent以DE的視角分析」。第二意見的 agent 沒有被告知 AI 的傾向，結論是 A、B 都不建議，改提 C：updated_at 不比 fact 新的事件先分出來當晚到事件，用「可達性」檢查；比 fact 新的事件才逐段比。理由是 B 有兩個問題：重跑同一檔時，該批較舊的列會被拿去和已更新的 fact 比，造成誤判，冪等會壞；晚到的舊事件會被當成反向轉移。
+
+**AI 的錯誤**：AI 在派工 prompt 裡把 L4 的方向寫反了，寫成「day1→day2 是 paid→cancelled，day2 的 updated_at 比較舊」，實際是 day1 cancelled、day2 送來較舊的 paid（notes/part_a/schema-inference/order-time.md L4）。第二意見依錯誤描述，推論這 25 組在可達性檢查下會「矛盾」，這個推論不成立：照正確方向，fact 是 cancelled，收到較舊的 paid，paid 走得到 cancelled，屬於單純的晚到事件。發現者：AI 回頭核對 notes。
+
+- 依據：僅 process-log 記錄；L4 證據見 `notes/part_a/schema-inference/order-time.md`
