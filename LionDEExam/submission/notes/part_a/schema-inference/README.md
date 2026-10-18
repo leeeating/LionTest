@@ -26,6 +26,7 @@
 | [order-time.md](order-time.md) | 時區與日期格式、晚到與亂序、萃取時點、completed 語意 |
 | [order-amount.md](order-amount.md) | 金額比值規則、負數、×1000、NTD、coupon −1、折扣前後、產品與匯率參照 |
 | [members.md](members.md) | 會員同日重複、N/A、1900 生日、快照規則 |
+| [coupon-currency.md](coupon-currency.md) | coupon_discount 的幣別（〔使用者判斷〕當 TWD） |
 
 ## 怎麼重跑
 

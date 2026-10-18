@@ -399,3 +399,9 @@ T6 第一階段的實作者提出 5 個問題，使用者逐題決定（第 1 �
 第 5 題決定之前，使用者擔心整個讀取驗證層「是我自己的想法沒有經過驗證」，要求另一個 agent 評估這個設計在業界的評價。研究 agent 的總評：有依據，主體是常見做法（Databricks 官方的 medallion 建議把多數欄位存成字串，silver 層再隔離壞列；源頭可追到 Kimball 的 error event table）。不算主流的有兩點：驗證引擎自己寫（Fabric 沒有 DLT，這點理由站得住）、沒有獨立的 bronze 層。研究 agent 也指出業界把 enum 放在合約層（dbt `accepted_values`、ODCS `validValues`）。使用者決定值域放合約層，理由：「值域是 schema 的一部分」。
 
 - 依據：`notes/part_a/validation-design-industry-review.md`；實作在 T6 第二階段
+
+### 2026-10-18｜Part A｜coupon_discount 當台幣
+
+撰寫 model.md 的 agent 發現，README 寫的「coupon 是 TWD」在程式裡找不到依據，所以列為待決。使用者問「coupon有辦法推論嗎」，AI 直接查 base：TWD、USD、JPY、NTD 的 coupon 面額完全相同（0～950，每 50 一級）；如果把 coupon 當成訂單幣別，USD 訂單有 785 筆的折扣會大於售價，JPY 訂單的折扣則小到幾乎沒有。使用者決定 coupon 當台幣，理由：「三種幣別面額一樣」，並要求把推論寫成 note。
+
+- 依據：`notes/part_a/schema-inference/coupon-currency.md`（附查詢與輸出）
