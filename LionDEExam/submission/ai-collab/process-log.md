@@ -402,6 +402,18 @@ T6 第一階段的實作者提出 5 個問題，使用者逐題決定（第 1 �
 
 ### 2026-10-18｜Part A｜coupon_discount 當台幣
 
-撰寫 model.md 的 agent 發現，README 寫的「coupon 是 TWD」在程式裡找不到依據，所以列為待決。使用者問「coupon有辦法推論嗎」，AI 直接查 base：TWD、USD、JPY、NTD 的 coupon 面額完全相同（0～950，每 50 一級）；如果把 coupon 當成訂單幣別，USD 訂單有 785 筆的折扣會大於售價，JPY 訂單的折扣則小到幾乎沒有。使用者決定 coupon 當台幣，理由：「三種幣別面額一樣」，並要求把推論寫成 note。
+撰寫 model.md 的 agent 發現，README 寫的「coupon 是 TWD」在程式裡找不到依據，所以列為待決。使用者問「coupon有辦法推論嗎」，AI 直接查 base：TWD、USD、JPY、NTD 的 coupon 面額完全相同（0～950，每 50 一級）；如果把 coupon 當成訂單幣別，USD 訂單有 785 筆的折扣會大於售價，JPY 訂單的折扣則小到幾乎沒有。使用者決定：「coupon 當 TWD，三種幣別面額一樣」，並要求把推論寫成 note。
 
 - 依據：`notes/part_a/schema-inference/coupon-currency.md`（附查詢與輸出）
+
+### 2026-10-18｜Part A｜ADR-01～04 定稿
+
+使用者逐份看過 ADR 的背景，用自己的話寫下決定與理由，再指示把四份的狀態改為「已定案」（「改」）：
+- ADR-01：「正式環境在Fabric，用Spark＋Delta之後不用重寫」。先問了 Fabric 是什麼服務、能不能接自家的 MSSQL，這兩題整理成 learning 筆記。
+- ADR-02：「把資料來源抽象出來可以將data pipline遷移到不同資料源」等三句。AI 提醒理由沒說明「為什麼不架真的 DB」，使用者未補。
+- ADR-03：理由改寫成「訂單的基本資訊不能被修改」，取代先前的原話「先假設訂單狀態不能被改寫」。舊句字面上說的是狀態，原意其實是內容。
+- ADR-04：「營收和取消率都以訂單為單位，一張訂單一列就夠」。
+
+AI 同時修正了 ADR-01、ADR-04「後果」中過時的敘述：Docker 已提供；冪等不能用 numTargetRowsUpdated 證明；沒有 bronze 層。
+
+- 依據：commit `18072b6`、`b04b4f9`、`98e871b`、`52d232b`、`aa257d4`
