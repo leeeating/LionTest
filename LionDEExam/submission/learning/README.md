@@ -16,7 +16,7 @@
 | Data lake、warehouse、lakehouse：資料存成什麼形式 | 📄 [data-lake-vs-warehouse.md](0-storage/data-lake-vs-warehouse.md) | `buggy_pipeline.py` 的 `LAKEHOUSE`、`format("delta")` | B、C |
 | DuckDB vs Spark：引擎怎麼選、跟連 SQL DB 的差別 | 📄 [duckdb-vs-spark.md](0-storage/duckdb-vs-spark.md) | ADR-01 執行引擎 | A、C |
 | ETL／ELT 與 medallion（bronze／silver／gold） | 📄 [etl-elt-medallion.md](0-storage/etl-elt-medallion.md) | ADR-02、Part A 管線分層 | A-2、C |
-| Microsoft Fabric：OneLake、Lakehouse、Data Factory、Power BI 怎麼組成一個平台 | 📄 [microsoft-fabric.md](0-storage/microsoft-fabric.md) | ADR-01 執行引擎、Part C 情境 | A、C |
+| Microsoft Fabric：OneLake、Lakehouse、Data Factory、Power BI 怎麼組成一個平台；怎麼接自家 MSSQL（Copy、Mirroring、CDC） | 📄 [microsoft-fabric.md](0-storage/microsoft-fabric.md) | ADR-01 執行引擎、Part C 情境 | A、C |
 
 ### 1. 資料建模（Transformation／Data architecture）
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |

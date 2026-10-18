@@ -24,6 +24,21 @@ Fabric 是微軟的 SaaS 資料平台，把儲存、ETL、Spark 運算、SQL 查
 
 計費依購買的運算容量（capacity），不是按每次使用計費。
 
+## 怎麼接自家的 MSSQL
+常見有三種接法，差別在資料多久同步一次：
+
+| 接法 | 怎麼運作 | 延遲 | 適合 |
+|---|---|---|---|
+| **Data Factory 的 Copy／Pipeline** | 排程把資料表整批，或依時間欄增量，複製進 Lakehouse | 看排程，通常每天或每小時 | 每日 BI 報表，跟本專案「每天一個增量檔」最像 |
+| **Mirroring（鏡像）** | Fabric 持續讀資料庫的變更紀錄（CDC），自動同步成 OneLake 的 Delta 表 | 接近即時 | 要即時資料、又不想自己寫 ETL |
+| **Eventstream＋CDC** | 把資料庫的每一筆變更當成事件串流送進來 | 秒級到分鐘級 | 即時儀表板（Part C 的分鐘級需求） |
+
+- **自家機房的 MSSQL（on-prem）**：要在公司內網裝 **on-premises data gateway**，Fabric 透過它連進來。資料庫在 Azure（Azure SQL）就不需要。
+- **未證實**：Mirroring 原本只支援 Azure 上的 SQL，後來擴充到自架的 SQL Server；支援哪些版本、是否已正式上線，沒有查證。各接法的計費細節也沒查。
+- **跟本專案的關係**：
+  - 源頭換成 MSSQL 時，只換讀取那一層（ADR-02 的來源介面）。
+  - 用 Mirroring 或 CDC 能拿到每次變動的時間，dim_member 的版本起始日就不用拿快照日來近似（process-log「dim_member：新版本從觀察到變動的快照日開始」）。
+
 ## 什麼時候用、什麼時候不要用
 - **適合**：公司已經用 Microsoft 365、Power BI，想把資料平台集中在一個產品裡；團隊不想自己維運 Spark 叢集
 - **要考慮**：綁定微軟生態系；按容量計費，用量小時不一定划算；本機無法完整重現，開發和測試要另外規劃（本專案就是在本機用 PySpark＋Delta 模擬 Lakehouse 那一層）
