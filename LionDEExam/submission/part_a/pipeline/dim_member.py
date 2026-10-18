@@ -29,7 +29,7 @@ from pyspark.sql.types import StringType
 
 from pipeline.contracts import MEMBERS_SCHEMA, SOURCE_ERROR_COL
 from pipeline.delta_io import merge_upsert
-from pipeline.validation import REJECT_REASONS_COL, cast_to_contract
+from pipeline.validation import REJECT_REASONS_COL, cast_to_contract, strict_date
 
 # 等級由低到高。資料裡實際出現的值只有這四個（members.csv 8,991 列已查過）；
 # 清單外的值（含 NULL）進 rejected，不猜它的排序。
@@ -290,10 +290,12 @@ def _unknown_row(spark: SparkSession) -> DataFrame:
 def _not_after(members: DataFrame, through: dt.date) -> DataFrame:
     """只留 extract_date <= through 的原始列。
 
-    extract_date 解析不了的列也留下，讓 cast_to_contract 把它分到 rejected，
-    否則壞列會被這個過濾靜默吃掉，筆數就不守恆。
+    extract_date 不符合合約日期規則的列也留下，讓 cast_to_contract 把它分到 rejected，
+    否則壞列會被這個過濾靜默吃掉，筆數就不守恆。判斷用合約的嚴格規則（strict_date），
+    不用 try_cast：try_cast 會把 "2026-07-15 junk" 當成 07-15，壞列就被算成
+    「through 之後」，要等到之後的批次才被發現。
     """
-    parsed = F.col("extract_date").try_cast("date")
+    parsed = strict_date(F.col("extract_date"))
     return members.filter(F.coalesce(parsed <= F.lit(through), F.lit(True)))
 
 

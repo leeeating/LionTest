@@ -45,6 +45,16 @@ _DECIMAL_PATTERN = r"^[+-]?[0-9]+(\.[0-9]+)?\z"
 _DATE_PATTERN = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}\z"
 
 
+def strict_date(raw: Column) -> Column:
+    """原始字串依合約的日期規則轉成 DateType；不是 yyyy-MM-dd 或日期不存在時回傳 NULL。
+
+    和 cast_to_contract 判斷 DateType 欄位用同一條規則。合約以外需要先看日期的地方
+    （例如 dim_member 依 extract_date 過濾）用這個函式，不要用 try_cast：
+    try_cast 會接受 "2026-07-15 junk" 這類值。
+    """
+    return F.when(raw.rlike(_DATE_PATTERN), raw.try_cast(DateType()))
+
+
 def _reason(cond: Column, text: str) -> Column:
     """條件成立時回傳原因字串，否則 NULL。"""
     return F.when(cond, F.lit(text))
@@ -100,9 +110,8 @@ def _format_reasons(raw: Column, field: StructField) -> list[Column]:
             ),
         ]
     if isinstance(dtype, DateType):
-        # 格式對但日期不存在（例如 2026-02-30）時 try_cast 為 NULL
-        bad = ~raw.rlike(_DATE_PATTERN) | casted.isNull()
-        return [_reason(present & bad, type_error)]
+        # 格式不對，或格式對但日期不存在（例如 2026-02-30）時為 NULL
+        return [_reason(present & strict_date(raw).isNull(), type_error)]
     # 合約之後若加入其他型別：至少保證「原值非空、轉型後變 NULL」算違規
     return [_reason(present & casted.isNull(), type_error)]
 
@@ -111,12 +120,15 @@ def _cast(raw: Column, dtype: DataType) -> Column:
     return raw if isinstance(dtype, StringType) else raw.try_cast(dtype)
 
 
-def cast_to_contract(df: DataFrame, schema: StructType) -> tuple[DataFrame, DataFrame]:
+def cast_to_contract(
+    df: DataFrame, schema: StructType, *, passthrough: tuple[str, ...] = ()
+) -> tuple[DataFrame, DataFrame]:
     """把原始字串 DataFrame 依合約轉型，回傳 (valid_df, rejected_df)。
 
     - df：來源讀取介面回傳的 DataFrame（合約欄位全為字串，可帶 SOURCE_ERROR_COL）。
     - valid_df：沒有任何違規的列，欄名、欄序、型別與合約相同
-      （nullability 一律為可空，必填欄位實際上不會有 NULL）。
+      （nullability 一律為可空，必填欄位實際上不會有 NULL）；passthrough 指定的欄位
+      原樣附在合約欄位之後（例如 fact_order 用來保留整列原始字串，之後隔離時寫回原值）。
     - rejected_df：有違規的列，保留所有原始字串欄位（含 SOURCE_ERROR_COL），
       加上 reject_reasons（ARRAY<STRING>，一列多個原因時全部列出，格式「欄名:原因」）。
     - 違規種類：欄位數不符、必填空值（含只有空白）、型別不符、小數位超過 scale、
@@ -148,6 +160,7 @@ def cast_to_contract(df: DataFrame, schema: StructType) -> tuple[DataFrame, Data
 
     valid = checked.filter(is_valid).select(
         [_cast(F.col(f.name), f.dataType).alias(f.name) for f in schema.fields]
+        + [F.col(c) for c in passthrough]
     )
     rejected = checked.filter(~is_valid)
     return valid, rejected

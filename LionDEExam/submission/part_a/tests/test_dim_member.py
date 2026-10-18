@@ -413,6 +413,21 @@ def test_dim_member_through_keeps_unparseable_extract_date_as_rejected(spark):
     assert {r.member_id for r in res.changes.collect()} == {"A1", UNKNOWN_MEMBER_ID}
 
 
+def test_dim_member_through_uses_strict_date_rule(spark):
+    # "2026-07-15 junk" 不符合合約的 yyyy-MM-dd，但 try_cast 會把它當成 2026-07-15，
+    # 以前會被算成「through 之後」而延後到之後的批次才發現；現在要在本批就進 rejected
+    rows = [
+        _member("A1", "一般", "台北市", "1990-01-01", "2020-01-01", "2026-04-30"),
+        _member("A2", "一般", "台北市", "1990-01-01", "2020-01-01", "2026-07-15 junk"),
+        _member("A3", "一般", "台北市", "1990-01-01", "2020-01-01", "2026-07-15"),
+    ]
+    res = build_dim_member(spark, _raw_df(spark, rows), through=D("2026-06-30"))
+    rejected = res.rejected.collect()
+    assert [r.member_id for r in rejected] == ["A2"]
+    assert rejected[0].reject_reasons == ["extract_date:型別不符（應為 date）"]
+    assert res.stats["input_rows"] == 2 and res.stats["rows_after_through"] == 1
+
+
 def test_dim_member_more_than_two_versions(spark):
     rows = [
         # X：一般 → 金卡 → 一般：3 版
