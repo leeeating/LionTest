@@ -282,7 +282,7 @@ AI 先用一位會員的三次快照示範 SCD2 版本表；使用者問「membe
 
 T3 實作 agent 暫時把 `YYYY/MM/DD HH:MM:SS`（base 3,001 筆）當台北時間解析，AI 請使用者定案。使用者先問「通常沒寫+8的話 代表UTC是嗎」，AI 說明沒有時區標記只代表沒記下來，要看寫入端的設定，並引用 T1 的兩項證據：3 組重複列與 `+08:00` 那列的時、分、秒相同；當 UTC 解析會有 384 筆更新時間早於下單時間。使用者決定：「台北 因為重複列跟時間先後都對得上」。
 
-- 依據：僅 process-log 記錄，實作在 T3 的 `parse_order_created_at()`；證據見 `notes/part_a/schema-inference/order-time.md` 時區語意一段
+- 依據：僅 process-log 記錄，實作在 T3 的 `parse_order_created_at()`（後改名為 `timeparse.parse_source_timestamp()`）；證據見 `notes/part_a/schema-inference/order-time.md` 時區語意一段
 
 ### 2026-10-18｜Part A｜型別違規：檔案層級整批停、列層級進隔離表
 
