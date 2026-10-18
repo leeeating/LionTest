@@ -46,17 +46,17 @@ Part A 要從 CSV 建出星型模型（`fact_order`、`dim_member` SCD2、`dim_p
 | C. pandas | 使用者最熟；不需要 Java | 沒有 `MERGE`，冪等 upsert 和 SCD2 都要手寫合併邏輯，容易出錯；檢核邏輯不是 SQL，報告較難閱讀；和 Fabric 的距離比 A 更遠 |
 
 ## 決定〔使用者撰寫〕
-〔待使用者確認〕選 B：PySpark＋Delta。
+選 B：PySpark＋Delta。
 
 ## 理由〔使用者撰寫〕
-〔待使用者確認〕使用者在對話中的原話：「是給生產環境的 也查過雄獅旅遊的規模」、「csv是demo資料 不能當作prod的資料量」。
+正式環境在 Fabric，用 Spark＋Delta 之後不用重寫。
 
-〔請補上：查到的規模是什麼〕
+（對齊時的原話：「是給生產環境的 也查過雄獅旅遊的規模」、「csv是demo資料 不能當作prod的資料量」。）
 
 ## 後果
-- **閱卷者執行成本**：README 要寫清楚前置需求（Java 版本、`uv sync`）與一條指令跑完整條管線；沒有 Java 的閱卷者要先安裝 Java，會吃掉「30 分鐘內重現」的時間，這是接受的代價。
+- **閱卷者執行成本**：本機執行需要 Java。為了「30 分鐘內重現」，另外提供 Dockerfile（Python 3.12＋Java 17＋建置時預先下載 Delta jar，執行時不需連網），閱卷者只需要 Docker；README 寫清楚兩種跑法。
 - **時區要明確設定**：Part B 的 F2 指出轉 timestamp 時 session timezone 會影響 `order_date`。管線要固定 `spark.sql.session.timeZone`，並有測試覆蓋。
 - **MERGE 前來源必須先去重**：Part B E12 實測，來源同一個 key 有多列時，若對不到 target 既有列，Delta `MERGE` 會**靜默插入多列**。每次 `MERGE` 前都要在來源端先依 key 取一筆，並有測試覆蓋。
-- **冪等證明可用 Delta 自身功能**：除了重跑前後的筆數與金額 checksum，還可以附 `DESCRIBE HISTORY` 作為輔助證據。
+- **冪等證明以內容為準**：用重跑前後的筆數與金額 checksum 證明。`DESCRIBE HISTORY` 可以附上，但 MERGE 重跑時 `numTargetRowsUpdated` 不為 0（既有列被重寫、值相同），不能拿它當「沒有改變」的證據（T3 驗收發現）。
 - **測試成本**：pytest 用 session 層級的 SparkSession fixture 共用一個 session，避免每個測試各自啟動。
 - **Part C 接得上**：Part A 的表結構和寫入方式可以直接作為 Part C Fabric 架構的 Lakehouse 層。
