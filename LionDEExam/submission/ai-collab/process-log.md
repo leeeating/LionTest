@@ -445,3 +445,9 @@ base 有 50 列負數金額，合計 -12,389,441.87 TWD。AI 列出三種處理�
 base 有 300 列 coupon = -1.0。AI 指出資料裡本來就有 coupon = 0.0（例如 TWD 3,310 筆），所以 -1 不像是「沒有折扣」，比較像是「未知」的代號，和會員的 `N/A`、`1900-01-01` 同一類。AI 列出三個做法：A 轉 NULL、B 轉 0、C 整列隔離，建議 A。使用者選 A，理由：「-1 代表未知，轉 NULL 不要猜」。
 
 - 依據：僅 process-log 記錄
+
+### 2026-10-18｜Part A｜J10：amount 定義為折扣前，fact 加 net_amount_twd
+
+資料看不出 amount 是折扣前還是折扣後：coupon 最多 950 台幣，訂單金額中位數約 20 萬台幣，差距不到 0.5%，比值分析分辨不出來。所以由使用者用業務定義決定。使用者先問「amount的決定會影響之後嗎」，AI 說明這會影響營收怎麼算（模組 E、Part C 的報表），不影響管線目前只存原值的寫法。使用者再問「在有存discount的情況下 amount會建議怎麼設計」，AI 提出業界做法：總額、折扣、淨額分三欄存，都是可加總的度量（Kimball 零售範例），而且一律換成台幣。使用者決定 amount 是折扣前（「那折扣前」），理由：「我的設計傾向紀錄所有金額」。欄位只加 `net_amount_twd`＝`amount_twd − coupon_discount`：既有的 `amount_twd` 就是折扣前金額，`coupon_discount` 就是台幣折扣（見 coupon 幣別定案）。coupon 為 NULL 時（V3），net 也是 NULL。
+
+- 依據：僅 process-log 記錄，實作待做
