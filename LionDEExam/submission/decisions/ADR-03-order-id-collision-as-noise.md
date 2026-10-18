@@ -1,5 +1,5 @@
 # ADR-03｜增量檔與 base 撞號的列當 noise 處理
-- 狀態：草稿
+- 狀態：已定案
 - Part：A
 - 關聯：增量檔與 base 撞號的列當 noise 處理（[process-log](../ai-collab/process-log.md)）；[order-identity.md 的 J2](../notes/part_a/schema-inference/order-identity.md#j2)、[J4](../notes/part_a/schema-inference/order-identity.md#j4)
 

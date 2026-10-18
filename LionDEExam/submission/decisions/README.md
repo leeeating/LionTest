@@ -26,7 +26,7 @@
 ## 索引
 | ADR | 標題 | Part | 狀態 |
 |---|---|---|---|
-| [ADR-01](ADR-01-execution-engine.md) | Part A 執行引擎：PySpark＋Delta | A | 草稿 |
-| [ADR-02](ADR-02-source-abstraction-schema-contract.md) | 管線以抽象來源設計，品質規則寫成 schema 合約 | A | 草稿 |
-| [ADR-03](ADR-03-order-id-collision-as-noise.md) | 增量檔與 base 撞號的列當 noise 處理 | A | 草稿 |
-| [ADR-04](ADR-04-fact-order-grain.md) | fact_order 粒度：一張訂單一列，存最新狀態 | A | 草稿 |
+| [ADR-01](ADR-01-execution-engine.md) | Part A 執行引擎：PySpark＋Delta | A | 已定案 |
+| [ADR-02](ADR-02-source-abstraction-schema-contract.md) | 管線以抽象來源設計，品質規則寫成 schema 合約 | A | 已定案 |
+| [ADR-03](ADR-03-order-id-collision-as-noise.md) | 增量檔與 base 撞號的列當 noise 處理 | A | 已定案 |
+| [ADR-04](ADR-04-fact-order-grain.md) | fact_order 粒度：一張訂單一列，存最新狀態 | A | 已定案 |

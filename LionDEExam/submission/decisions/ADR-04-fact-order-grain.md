@@ -1,5 +1,5 @@
 # ADR-04｜fact_order 粒度：一張訂單一列，存最新狀態
-- 狀態：草稿
+- 狀態：已定案
 - Part：A
 - 關聯：fact_order 粒度參考模組 E：一張訂單一列（[process-log](../ai-collab/process-log.md)）；[訂單狀態機](../notes/part_a/order-state-machine.md)；[learning：事實表三種型態](../learning/1-modeling/fact-table-types.md)
 

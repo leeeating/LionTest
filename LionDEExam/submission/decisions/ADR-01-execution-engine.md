@@ -1,5 +1,5 @@
 # ADR-01｜Part A 執行引擎：PySpark＋Delta
-- 狀態：草稿
+- 狀態：已定案
 - Part：A
 - 關聯：Part A 執行引擎選 PySpark＋Delta
 
