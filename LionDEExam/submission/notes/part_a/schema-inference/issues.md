@@ -19,7 +19,7 @@ noise＝題目刻意埋進資料的錯誤值。編號沿用原報告（V＝違�
 | V7 | base 同 order_id 兩列，內容完全相同，只差 `updated_at` 幾秒 | 40 組（多 40 列） | 確定的錯誤值 | [V7](order-identity.md#v7) |
 | J1 | orders 主鍵是 `order_id` 還是 `order_id + 版本` | — | 待使用者判斷 | [J1](order-identity.md#j1) |
 | J2 | 增量檔與 base 同 id 但內容像另一張單：noise 還是合法更新 | day1 603 / day2 602 / day3 603 列 | 使用者判斷：noise（ADR-03） | [J2](order-identity.md#j2) |
-| J3 | 增量檔同檔同 id，但會員、金額、下單時間都不同（原 V11） | 6 組、12 列 | 待使用者判斷 | [J3](order-identity.md#j3) |
+| J3 | 增量檔同檔同 id，但會員、金額、下單時間都不同（原 V11） | 6 組、12 列 | 依 ADR-03 後果處理：整組進隔離表（使用者未逐項確認） | [J3](order-identity.md#j3) |
 | J4 | 哪些欄位在原系統不可修改 | — | 待使用者判斷 | [J4](order-identity.md#j4) |
 
 ## 訂單的時間：時區、格式、晚到與亂序 → [order-time.md](order-time.md)

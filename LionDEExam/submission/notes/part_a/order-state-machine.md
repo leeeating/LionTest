@@ -40,9 +40,15 @@
 
 **為什麼大部分轉移沒有證據：** demo 資料裡，同一張單狀態真的有變的只有那 25 組；其餘重複列都是同狀態重送（見 [schema-inference/order-identity.md](schema-inference/order-identity.md#j1) 的 J1）。demo 是合成資料，不能據此推論正式環境的狀態變化很少（process-log「不能用 demo 的變動量推論 prod 的狀態歷程」）。轉移要以業務流程為準。
 
-**單向假設對那 25 組的影響：** 照檔案到達順序，這 25 組是 cancelled → paid；在單向假設下這個順序不可能發生，照 `updated_at` 的 paid → cancelled 才合理。以哪個為準仍是 J6，待使用者判斷。
+**單向假設對那 25 組的影響：** 照檔案到達順序，這 25 組是 cancelled → paid；在單向假設下這個順序不可能發生，照 `updated_at` 的 paid → cancelled 才合理。以哪個為準是 J6，〔使用者判斷〕照 `updated_at`（原話：「照 updated_at，符合狀態機單向假設」），所以這 25 組是合法的晚到事件。
 
 ## 待決定
 1. ~~⑤ completed → cancelled 存在嗎？例如出團後才申請取消退款。~~ 〔使用者判斷〕先假設**不存在**：completed 之後不能取消（原話：「先假設completed後不能取消」）。資料裡的 completed → cancelled 只出現在撞號列（會員、金額、下單時間都不同），不是同一張單的歷程。
-2. ~~有沒有 created → completed 的直接跳轉？例如現場付款的票券。~~ 〔使用者判斷〕先假設**不行**：completed 一定要先經過 paid（原話：「我先假設不行」）。
+2. ~~有沒有 created → completed 的直接跳轉？例如現場付款的票券。~~ 〔使用者判斷〕先假設**不行**：completed 一定要先經過 paid（原話：「我先假設不行」）。**後續修正**：管線無法確定上游送的是事件還是快照，中間的 paid 可能沒被拍到，所以檢查改用「可達性」：看到 created → completed 視為合法（中間狀態沒看到），另加標記供 A-3 統計，不隔離（原話：「在沒辦法確定是事件驅動還是快照的情況下 逐段也用可達性」）。狀態機本身的假設不變：completed 仍須經過 paid。
 3. ~~`completed` 是指「出團完成」還是「交易完成」？~~ 〔使用者判斷〕先假設是**出團完成**（原話：「completed先假設成出團完成」）。**與資料衝突，待處理**：base 的 completed 全部在出發日之前（增量檔中只有與 base 撞號的 completed 列才有出發日已過的情形）（見 [schema-inference/order-time.md](schema-inference/order-time.md) 的 J8），照這個假設，completed 應該在出發日之後才出現，但 base 的 completed 共 28,612 列（base 100,040 列的 28.6%），出發日全部晚於 `updated_at` 的日期，這些列在此假設下都不合理（已排除時區：`updated_at` 全是 `+08:00`，出發日比更新日晚 4～119 天，中位數 62 天）。〔使用者判斷〕假設不變，這些列當資料品質問題處理，理由：「先把狀態規則定下來 之後比較好處理」。怎麼處理尚未決定。
+
+## 管線怎麼用這個狀態機（2026-10-18 定案）
+- **可達性**取代一步轉移表：往回走（cancelled → paid、completed → cancelled、completed → paid）不合法；跳過中間狀態合法但標記。
+- **晚到事件**（updated_at 不比 fact 新）不當狀態轉移，只檢查舊狀態能否走到 fact 現況（原話：「晚到事件不該當成狀態轉移」）。
+- 同一秒內兩個不同狀態 → 兩列都隔離（「資料不足時不要讓管線自己猜」）；第一個不合法事件之後的同批事件一起隔離（「鏈斷掉後面的資料就不可信」）。
+- 詳見 process-log 第三部分各事件。
