@@ -351,3 +351,9 @@ T6 開工前要決定狀態機檢查要涵蓋哪些轉移：A 只比「既有 fa
 **AI 的錯誤**：AI 在派工 prompt 裡把 L4 的方向寫反了，寫成「day1→day2 是 paid→cancelled，day2 的 updated_at 比較舊」，實際是 day1 cancelled、day2 送來較舊的 paid（notes/part_a/schema-inference/order-time.md L4）。第二意見依錯誤描述，推論這 25 組在可達性檢查下會「矛盾」，這個推論不成立：照正確方向，fact 是 cancelled，收到較舊的 paid，paid 走得到 cancelled，屬於單純的晚到事件。發現者：AI 回頭核對 notes。
 
 - 依據：僅 process-log 記錄；L4 證據見 `notes/part_a/schema-inference/order-time.md`
+
+### 2026-10-18｜Part A｜狀態機檢查採 C：晚到事件分開處理
+
+接續前一事件。使用者看過 A、B、C 三個選項的取捨，以及第二意見對 B 的批評（重跑時會誤判、晚到的舊事件會被當成反向轉移），決定採用 C：updated_at 不比 fact 新的事件先分出來，當作晚到事件，改做「可達性」檢查（這個舊狀態能不能走到 fact 現在的狀態）；比 fact 新的事件才依時間逐段比對，第一段從 fact 的現況開始；遇到不合法的轉移，該事件進隔離表，fact 不更新。理由：「晚到事件不該當成狀態轉移」。新訂單的第一個狀態可以是什麼、同一秒內出現不同狀態、不合法之後的事件要不要一起隔離，這幾點還沒定，T6 開工前再決定。
+
+- 依據：僅 process-log 記錄，實作在 T6
