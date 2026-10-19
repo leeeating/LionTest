@@ -17,6 +17,7 @@
 | DuckDB vs Spark：引擎怎麼選、跟連 SQL DB 的差別 | 📄 [duckdb-vs-spark.md](0-storage/duckdb-vs-spark.md) | ADR-01 執行引擎 | A、C |
 | ETL／ELT 與 medallion（bronze／silver／gold） | 📄 [etl-elt-medallion.md](0-storage/etl-elt-medallion.md) | ADR-02、Part A 管線分層 | A-2、C |
 | Microsoft Fabric：OneLake、Lakehouse、Data Factory、Power BI 怎麼組成一個平台；怎麼接自家 MSSQL（Copy、Mirroring、CDC） | 📄 [microsoft-fabric.md](0-storage/microsoft-fabric.md) | ADR-01 執行引擎、Part C 情境 | A、C |
+| 表格式：Delta 與 Iceberg 在 Parquet 上加了什麼（ACID、MERGE、time travel、CHECK；Iceberg 的引擎中立與隱藏分區） | 📄 [table-formats-delta-iceberg.md](0-storage/table-formats-delta-iceberg.md) | ADR-01、ADR-05、Delta CHECK 定案 | A、C |
 
 ### 1. 資料建模（Transformation／Data architecture）
 | 觀念 | 狀態 | 本專案在哪碰到 | 題目 |
@@ -35,6 +36,7 @@
 | MERGE 冪等寫入：重跑結果不變 | 📄 [merge-idempotent-write.md](2-incremental-etl/merge-idempotent-write.md) | Part B #9 `write_fact` 的 `mode("append")` | A-2、B |
 | 取每組最新一筆：事件型增量去重 | 📄 [latest-row-per-group.md](2-incremental-etl/latest-row-per-group.md) | Part B #2 `clean_orders` | A-2、B |
 | Delta time travel：讀回舊版本、RESTORE、commit 標記 | 📄 [delta-time-travel.md](2-incremental-etl/delta-time-travel.md) | T6 冪等重跑讀「這批寫入前」的 fact | A-2 |
+| 修正資料：改源頭或改規則再重跑，不直接改倉儲 | 📄 [fix-data-by-rerun.md](2-incremental-etl/fix-data-by-rerun.md) | 使用者問 OLTP 下 SQL 改資料、DE 怎麼修；`--force`、MERGE 條件 | A-2 |
 | 晚到資料（late-arriving）：本該在前一批出現的資料晚到 | ○ | `notes/dataset/incremental.md`：day2 有 6 列 `updated_at` 早於批次日 | A-2 |
 | 增量檔的時間欄位與批次日不一致（約 70% `updated_at` 晚於批次日，原因未證實） | ○ | `notes/dataset/incremental.md` 的 `updated_at` 分布 | A-2 |
 

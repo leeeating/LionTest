@@ -495,4 +495,42 @@ ADR-05 定案時的機制是「在 commit 標上 `batch:<id>`，重跑時找這�
 
 另外，A-3 的定案已經實作：V1 合約擋 amount ≤ 0（base fact 變成 99,950 列）、V3 coupon -1 轉 NULL（299 列）、新增 `net_amount_twd`、V2 清單存成 `amount_review` 表（40 列）。
 
-- 依據：`decisions/ADR-05-rerun-against-pre-batch-version.md`；`batch_log.py` 的 `pin_fact_version`；實作 agent 回報（251 passed，TZ=UTC 時間相關 129 passed，Docker 實跑四批平衡）；尚未經過獨立驗收
+- 依據：`decisions/ADR-05-rerun-against-pre-batch-version.md`；`batch_log.py` 的 `pin_fact_version`；實作 agent 回報（251 passed，TZ=UTC 時間相關 129 passed，Docker 實跑四批平衡）；針對性驗收有條件過，見 `notes/part_a/t6-review-findings.md`；commit b975543
+
+### 2026-10-19｜Part A｜net 變負數：負的 coupon 在合約擋下，太大的 coupon 只列清單
+
+T6 針對性驗收指出：`net_amount_twd = amount_twd − coupon_discount` 在 coupon 大於金額時會變負數，-1 以外的負 coupon 則會讓 net 比原價高；程式沒有處理，文件也沒寫。本資料 0 筆，屬於防護性設計。AI 列出三個選項：A 只寫進已知限制；B 負的 coupon（-1 以外）在合約層擋下，coupon 大於金額時照寫但列進 `amount_review` 清單；C 兩種都進隔離表。AI 建議 B。使用者選 B，理由：「負數coupon沒有合理解釋，太大的可能是全額折抵」。
+
+- 依據：`notes/part_a/t6-review-findings.md`（針對性驗收的第一個低嚴重度問題）；實作待派
+
+### 2026-10-19｜Part A｜匯率表壞一列就整批停
+
+T5 實作者自行把「產品清單壞列就整批停」的規則延伸到匯率表：匯率表有壞列，或同一天同一幣別重複時，整批停。這項設計一直沒有使用者的定案，是 A-3 報告的撰寫 agent 比對 process-log 時發現的；A-3 報告的 read-back 驗收也指出，報告寫「每項決策都由使用者定案」說得太滿。AI 列出兩個選項：整批停；只隔離受影響的外幣訂單、其他照寫。AI 建議整批停。使用者選整批停，理由：「匯率影響的是訂單金額 這個程度比較大 需要事先停止」。
+
+- 依據：`notes/part_a/t5-review-findings.md`「實作者自己加或自己決定」；A-3 報告第五節
+
+### 2026-10-19｜Part A｜會員對不到版本：進隔離表，不落 -1
+
+`resolve_member_sk` 在訂單的會員對不到 dim_member 任何版本時（會員不在快照，或下單日早於最早的版本），原本讓 member_sk 落到 -1、訂單照寫。這是實作時順著「fact_order 存代理鍵 member_sk」做的，沒有使用者定案；A-3 報告的 read-back 驗收指出這一點。本資料 0 筆，屬於防護性設計。AI 列出三個選項：A 落 -1、訂單照寫（和 V6 商品不在清單相同）；B 進隔離表；C inferred member。AI 建議 A，理由是和 V6 一致。使用者選 B，理由：「在訂單重要度之後是會員資料 如果有未知會員資料在做客戶分析是一件困難的事 所以要有錯誤提醒修正data pipline」。
+
+使用者把商品和會員分開處理：商品可能隨時間下架消失，所以 V6 保留訂單、落 -1；會員是客戶分析的主體，對不到就代表管線或上游有錯，要用隔離表提醒修正。
+
+- 依據：A-3 報告第五節；實作待派
+
+### 2026-10-19｜Part A｜會員快照的違規列：另開會員隔離表
+
+T5 實作者原本讓 dim_member 的違規列（等級不在清單、註冊日晚於快照日等）只計數，不進任何隔離表。這項沒有使用者定案。本資料 0 筆，屬於防護性設計。AI 列出三個選項：A 只計數；B 另開會員隔離表（原始字串＋原因＋batch_id）；C 放進訂單隔離表。AI 建議 B。使用者問「這個DE角度怎麼處理」，AI 說明兩種業界做法：每個來源各一張隔離表（Databricks quarantine），或共用一張錯誤事件表（Kimball error event table）；並說明主檔慣例是壞列不蓋掉上一個好版本，以及連鎖效應：會員第一次出現就壞掉時，他的訂單會依前一個定案進訂單隔離表。使用者選 B，理由：「根據DE的慣例」。
+
+- 依據：`notes/part_a/t5-review-findings.md`「實作者自己加或自己決定」；實作待派
+
+### 2026-10-19｜Part A｜A-3 報告改成以表格與欄位為中心
+
+A-3 報告原本依問題編號（V1、L3…）分節。使用者提出：「我希望a3的文件可以以表格跟欄位為思考中心去描述」。AI 給兩種結構：正文依「來源表 → 欄位」重組，跨欄位的問題放在各表的「跨欄位」小節，編號只當索引；或保留問題分節，開頭加一張表×欄位總覽。使用者選前者。
+
+- 依據：`part_a/data-quality-report.md`（重組中）
+
+### 2026-10-19｜Part A｜Delta CHECK 約束：只加在關鍵欄位，當最後一道防線
+
+ADR-02 的後果留了一個未決項：「要不要加 Delta CHECK，T5 寫入 fact_order 時再決定」，T5 沒有決定。AI 列出三個選項：A 不加；B 只加在關鍵欄位（例如 `amount > 0`、`order_status IN (...)`、`member_sk IS NOT NULL`）；C 所有合約規則都加。AI 建議 B。使用者問「為什麼是用delta去實現 不能是在python中嗎」，AI 說明 Python 合約層已經在做驗證，但只擋得住走管線的寫入；CHECK 存在表本身，連 notebook 直接寫入、手動 SQL `UPDATE` 都擋得住，類比 OLTP 的後端驗證加上資料庫約束。使用者選 B，理由：「Delta CHECK 是最後一道防線，擋得住繞過管線的寫入」。
+
+- 依據：`decisions/ADR-02-source-abstraction-schema-contract.md`「後果」；實作待派
