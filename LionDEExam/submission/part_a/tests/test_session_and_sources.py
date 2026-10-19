@@ -37,6 +37,19 @@ def test_session_disables_csv_column_pruning(spark):
     assert spark.conf.get("spark.sql.csv.parser.columnPruning.enabled") == "false"
 
 
+def test_session_binds_driver_to_localhost(spark):
+    # 不綁的話 driver 用區網 IP，斷網時大的 task 結果傳不回來
+    assert spark.conf.get("spark.driver.host") == "localhost"
+    assert spark.conf.get("spark.driver.bindAddress") == "127.0.0.1"
+
+
+def test_session_driver_memory_is_2g(spark):
+    # 預設 1g 時全套測試會 OOM；設定要在 JVM 啟動前生效，所以直接看 JVM 的最大 heap
+    assert spark.conf.get("spark.driver.memory") == "2g"
+    max_mb = spark._jvm.java.lang.Runtime.getRuntime().maxMemory() // 2**20
+    assert max_mb > 1024
+
+
 def test_session_has_delta_enabled(spark):
     assert "DeltaSparkSessionExtension" in spark.conf.get("spark.sql.extensions")
 
@@ -87,9 +100,13 @@ def test_all_sources_follow_contract_and_conserve_rows(source, method, args, sch
     # 因為 CSV 的 count() 走的執行路徑可能不同（column pruning）
     assert n_valid + n_rej == n_raw
     assert (valid.count(), rejected.count(), raw.count()) == (n_valid, n_rej, n_raw)
-    # 2026-10-18 實查：目前資料沒有任何列違反合約（已知的品質問題都在合約之外，
-    # 例如負數金額、NTD、N/A，交給 silver 層）
-    assert n_rej == 0
+    # 2026-10-19 實查：只有 orders_base 的 50 列負數金額違反合約（V1，使用者定在合約層擋下）；
+    # 其他已知的品質問題（NTD、N/A、coupon -1.0）都在合約之外
+    expected_rejected = 50 if method == "orders_base" else 0
+    assert n_rej == expected_rejected
+    if n_rej:
+        reasons = {tuple(r[REJECT_REASONS_COL]) for r in rejected.collect()}
+        assert reasons == {("amount:必須大於 0",)}
 
 
 def test_dirty_timestamp_kept_as_raw_string(source):

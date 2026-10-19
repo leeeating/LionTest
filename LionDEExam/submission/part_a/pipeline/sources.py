@@ -7,6 +7,8 @@ SourceReader 是管線唯一依賴的讀取介面；換源頭（例如營運 SQL
 from __future__ import annotations
 
 import csv
+import hashlib
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -23,6 +25,17 @@ DEFAULT_DATASET_DIR = (
 )
 
 INCREMENTAL_DAYS = (1, 2, 3)
+
+
+def file_sha256(paths: Sequence[str | Path]) -> str:
+    """檔案內容的 sha256。多個檔依傳入順序串接（每個檔前加檔名與長度，避免邊界混淆）。"""
+    h = hashlib.sha256()
+    for p in paths:
+        p = Path(p)
+        data = p.read_bytes()
+        h.update(f"{p.name}\0{len(data)}\0".encode())
+        h.update(data)
+    return h.hexdigest()
 
 
 class SourceFileError(Exception):
@@ -55,6 +68,10 @@ class SourceReader(Protocol):
     def products(self) -> DataFrame: ...
 
     def fx_rates(self) -> DataFrame: ...
+
+    def orders_checksum(self, day: int | None) -> str:
+        """一批訂單來源的指紋（day=None 是 base）；批次紀錄用它偵測來源被改過。"""
+        ...
 
 
 class CsvSource:
@@ -109,13 +126,26 @@ class CsvSource:
             .load(path)
         )
 
-    def orders_base(self) -> DataFrame:
-        return self._read("orders_base.csv", contracts.ORDERS_SCHEMA)
+    @property
+    def dataset_dir(self) -> Path:
+        return self._dir
 
-    def orders_incremental(self, day: int) -> DataFrame:
+    def orders_path(self, day: int | None) -> Path:
+        """訂單來源檔的路徑：day=None 是 orders_base.csv，1～3 是對應的增量檔。"""
+        if day is None:
+            return self._dir / "orders_base.csv"
         if day not in INCREMENTAL_DAYS:
             raise ValueError(f"沒有第 {day} 天的增量檔，可用：{INCREMENTAL_DAYS}")
-        return self._read(f"orders_incremental_day{day}.csv", contracts.ORDERS_SCHEMA)
+        return self._dir / f"orders_incremental_day{day}.csv"
+
+    def orders_checksum(self, day: int | None) -> str:
+        return file_sha256([self.orders_path(day)])
+
+    def orders_base(self) -> DataFrame:
+        return self._read(self.orders_path(None).name, contracts.ORDERS_SCHEMA)
+
+    def orders_incremental(self, day: int) -> DataFrame:
+        return self._read(self.orders_path(day).name, contracts.ORDERS_SCHEMA)
 
     def members(self) -> DataFrame:
         return self._read("members.csv", contracts.MEMBERS_SCHEMA)

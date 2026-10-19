@@ -8,7 +8,7 @@
   原始值一個字元都不改，型別錯的值也不會在讀取時變成 NULL。
 - 檔案層級問題（檔案不存在、表頭不符、沒有資料列）：讀取時整批報錯，不寫入任何東西。
 - 列層級問題（型別轉不過、Decimal 小數位超過 scale、必填欄位空值或只有空白、
-  欄位數不符、時間字串無法解析）：
+  欄位數不符、時間字串無法解析、值不在允許範圍、金額不大於 0）：
   validation.cast_to_contract() 把該列分到 rejected 並記下原因，其他列照常處理。
 
 型別原則：
@@ -32,7 +32,21 @@ from pyspark.sql.types import (
     StructType,
 )
 
+from pipeline.order_status import STATUSES
 from pipeline.timeparse import FORMAT_METADATA_KEY, SOURCE_TIMESTAMP
+
+# 欄位 metadata：值必須在這份清單內（大小寫、空白都要完全相同），否則列進 rejected，
+# 原因「值不在允許範圍」。由 validation.cast_to_contract 檢查。
+ALLOWED_VALUES_KEY = "allowed_values"
+
+# 欄位 metadata：數值必須大於 0（ADR-02 舉的 CHECK (amount > 0)），否則列進 rejected，
+# 原因「必須大於 0」。由 validation.cast_to_contract 檢查。
+POSITIVE_KEY = "positive"
+
+# 訂單幣別的允許值（2026-10-18 以 duckdb 查四個訂單檔：base 有 TWD、NTD、USD、JPY，
+# 三天增量只有 TWD、USD、JPY）。NTD 是 base 裡 TWD 的別名（V4，200 列），保留並以匯率 1 換算。
+# 新幣別要先確認匯率表有提供，再加進來；沒加之前整列隔離，不會悄悄變成找不到匯率。
+ORDER_CURRENCIES: tuple[str, ...] = ("TWD", "NTD", "USD", "JPY")
 
 # 原幣別金額：最大整數位 10 位（含疑似 ×1000 的值），小數最多 2 位
 AMOUNT_TYPE = DecimalType(18, 2)
@@ -55,13 +69,21 @@ ORDERS_SCHEMA = StructType(
         StructField("product_id", StringType(), False),
         # 描述性欄位，空值不影響金額與歸屬
         StructField("channel", StringType(), True),
-        # 狀態機判斷需要
-        StructField("order_status", StringType(), False),
+        # 狀態機判斷需要；允許值和狀態機共用 order_status.STATUSES（唯一一份）
+        StructField(
+            "order_status", StringType(), False, {ALLOWED_VALUES_KEY: list(STATUSES)}
+        ),
         StructField("quantity", IntegerType(), False),
         # currency 有 NTD 等非標準值，本來就是字串，對應規則在 silver 層；
         # 空值時無法換算 TWD
-        StructField("currency", StringType(), False),
-        StructField("amount", AMOUNT_TYPE, False),
+        StructField(
+            "currency",
+            StringType(),
+            False,
+            {ALLOWED_VALUES_KEY: list(ORDER_CURRENCIES)},
+        ),
+        # 必須大於 0（使用者定 V1：「負數在合約層就該擋下」；base 有 50 列負數）
+        StructField("amount", AMOUNT_TYPE, False, {POSITIVE_KEY: True}),
         # 「沒有折扣」也可能以空值表示，不強制
         StructField("coupon_discount", AMOUNT_TYPE, True),
         # 混有 ISO+08:00、Z 結尾（UTC）、YYYY/MM/DD HH:MM:SS（無時區）三種格式 → 保留字串；

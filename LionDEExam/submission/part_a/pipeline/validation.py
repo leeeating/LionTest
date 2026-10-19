@@ -24,7 +24,7 @@ from pyspark.sql.types import (
     StructType,
 )
 
-from pipeline.contracts import SOURCE_ERROR_COL
+from pipeline.contracts import ALLOWED_VALUES_KEY, POSITIVE_KEY, SOURCE_ERROR_COL
 from pipeline.timeparse import (
     FORMAT_METADATA_KEY,
     SOURCE_TIMESTAMP,
@@ -78,6 +78,15 @@ def _format_reasons(raw: Column, field: StructField) -> list[Column]:
     type_error = f"{name}:型別不符（應為 {dtype.simpleString()}）"
 
     if isinstance(dtype, StringType):
+        allowed = field.metadata.get(ALLOWED_VALUES_KEY)
+        if allowed is not None:
+            # 完全比對：大小寫、前後空白不同都算違規，不替上游猜
+            return [
+                _reason(
+                    present & ~raw.isin(*allowed),
+                    f"{name}:值不在允許範圍（{'、'.join(allowed)}）",
+                )
+            ]
         if field.metadata.get(FORMAT_METADATA_KEY) == SOURCE_TIMESTAMP:
             # 與 parse_source_timestamp 共用同一份格式定義；解析不了就不能算下單日／比新舊
             fmts = "、".join(SOURCE_TIMESTAMP_FORMATS)
@@ -108,6 +117,11 @@ def _format_reasons(raw: Column, field: StructField) -> list[Column]:
                 present & well_formed & (int_digits > dtype.precision - dtype.scale),
                 f"{name}:整數位超過 {dtype.precision - dtype.scale} 位",
             ),
+            *(
+                [_reason(present & well_formed & (casted <= 0), f"{name}:必須大於 0")]
+                if field.metadata.get(POSITIVE_KEY)
+                else []
+            ),
         ]
     if isinstance(dtype, DateType):
         # 格式不對，或格式對但日期不存在（例如 2026-02-30）時為 NULL
@@ -132,7 +146,9 @@ def cast_to_contract(
     - rejected_df：有違規的列，保留所有原始字串欄位（含 SOURCE_ERROR_COL），
       加上 reject_reasons（ARRAY<STRING>，一列多個原因時全部列出，格式「欄名:原因」）。
     - 違規種類：欄位數不符、必填空值（含只有空白）、型別不符、小數位超過 scale、
-      整數位超過、時間字串無法解析（合約 metadata 標記 source_timestamp 的欄位）。
+      整數位超過、時間字串無法解析（合約 metadata 標記 source_timestamp 的欄位）、
+      值不在允許範圍（合約 metadata 標記 allowed_values 的欄位）、
+      數值不大於 0（合約 metadata 標記 positive 的欄位）。
     - 兩者用同一個條件（reject_reasons 是否為空）切開，互斥且涵蓋所有列，
       所以 valid 筆數＋rejected 筆數＝輸入筆數。
     """

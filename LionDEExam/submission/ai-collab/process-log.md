@@ -477,4 +477,22 @@ T6 驗收找到規則 5 和狀態機規則的衝突。「除了 updated_at 全�
 
 T6 的實作者為了讓重跑結果和第一次相同，用 Delta time travel 讀取「這批寫入前」的 fact 來比對。它認為這是方向性設計，問要不要寫成 ADR。使用者先後問了「這兩提是什麼」「eli5」「time travel 怎麼使用」，AI 用記帳本的比喻說明，並實跑範例寫成 learning 筆記。AI 判斷這個機制符合 ADR 的三個條件（難回頭、沒有脈絡會覺得奇怪、有替代方案），建議寫成 ADR，使用者回「ADR-05」。ADR 草稿列出四個選項：time travel、只保證 fact 一致、重跑前 RESTORE、每批另存快照表。決定與理由由使用者撰寫。
 
+定案前，使用者追問了這個機制怎麼運作：「也就是說為delta提供一個版本欄位」「這個功能預設沒有開嗎」「為什麼set後要unset」「每次都有傳入marker不會覆蓋嗎」。AI 說明：版本號是 Delta 內建的，不是新加的欄位；標籤寫在 commit 的 userMetadata，預設為空；這個設定作用在整個 session，所以要 unset，避免沒有傳 marker 的寫入沿用舊標籤。使用者選 A，決定與理由見 ADR-05。
+
 - 依據：`decisions/ADR-05-rerun-against-pre-batch-version.md`
+
+### 2026-10-19｜Part A｜checksum 涵蓋參考資料：訂單檔不同就擋，參考資料不同只警告
+
+T6 的批次紀錄原本只算這批訂單檔的 checksum，會員快照、產品清單、匯率表都沒有算。AI 列出三個選項：A 維持現狀；B 全部算，任一不同就擋；C 全部算，訂單檔不同才擋，參考資料不同只印警告。AI 建議 C。使用者先問「前面的delta不是在作同一件事嗎」，AI 說明 time travel 確保比對基準（輸出端）相同，checksum 確保讀進來的檔（輸入端）相同，冪等要兩邊都成立。使用者再問「訂單為什麼不能被修改」，AI 說明訂單可以改，但要用新的一批送來，不能回頭改已經處理過的檔；這和 ADR-03（訂單內容不能變）是兩件事。使用者選 C，理由：「要避免訂單狀態可以被隨意修改 如果要修改需要使用force來紀錄」。
+
+AI 查了程式碼：目前 `run_once` 在 force=True 時會直接覆寫完成紀錄（`record_completed(..., replace=force)`），不會留下「這批曾被強制重跑」的痕跡。使用者的理由要求 force 必須留下紀錄，因此實作要補上這一點。
+
+- 依據：僅 process-log 記錄；`batch_log.py` 的 `run_once`（搜尋 `replace=force`）
+
+### 2026-10-19｜Part A｜ADR-05 定案後改實作：改用 batch_start 記版本
+
+ADR-05 定案時的機制是「在 commit 標上 `batch:<id>`，重跑時找這批第一個標記，讀它的前一版」。T6 驗收已經指出，該批 MERGE 0 列時不會產生 commit，也就找不到標記。實作者原本有兩個修法：寫一個帶標記的空 commit，或寫入前先記下版本。它實測發現，對已存在的表做空的 append，Delta 不會產生 commit，所以前者行不通。最後新增 `batch_start` 表：每批第一次開始、還沒寫任何表之前，記下當時 fact 的版本號，之後重跑都沿用這個版本。使用者的決定（用 time travel 讀這批寫入前的版本）不變；AI 更新了 ADR-05 的選項 A 描述與後果。發現者：漏洞由 T6 驗收 agent 發現，空 commit 不可行由實作 agent 實測發現。
+
+另外，A-3 的定案已經實作：V1 合約擋 amount ≤ 0（base fact 變成 99,950 列）、V3 coupon -1 轉 NULL（299 列）、新增 `net_amount_twd`、V2 清單存成 `amount_review` 表（40 列）。
+
+- 依據：`decisions/ADR-05-rerun-against-pre-batch-version.md`；`batch_log.py` 的 `pin_fact_version`；實作 agent 回報（251 passed，TZ=UTC 時間相關 129 passed，Docker 實跑四批平衡）；尚未經過獨立驗收

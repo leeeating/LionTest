@@ -18,3 +18,5 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["LionDEExam/submission/part_a"]
 testpaths = ["LionDEExam/submission/part_a/tests"]
+# 開發中只跑快的：pytest -m "not slow"；全套與 TZ=UTC 交付前各跑一次
+markers = ["slow: 會寫 Delta 表或跑真實資料完整流程的測試"]

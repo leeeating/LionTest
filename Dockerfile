@@ -32,5 +32,10 @@ EOF
 
 COPY LionDEExam ./LionDEExam
 
-# Part A 管線完成後，改成跑完整條管線的那一條指令
-CMD ["bash"]
+# 管線入口：依序跑 base → day1 → day2 → day3，印出每批對帳。
+# 資料目錄與輸出目錄可用環境變數覆寫（docker run -e LIONTEST_OUT=... -v ...），
+# 或直接在 docker run 最後接參數：python -m pipeline.run --data-dir ... --out ...
+ENV PYTHONPATH=/app/LionDEExam/submission/part_a \
+    LIONTEST_DATA_DIR=/app/LionDEExam/candidate_package/dataset \
+    LIONTEST_OUT=/app/warehouse
+CMD ["python", "-m", "pipeline.run"]

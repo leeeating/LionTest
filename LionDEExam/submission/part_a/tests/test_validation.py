@@ -105,8 +105,8 @@ def test_scientific_notation_is_rejected(spark):
         ({"quantity": "99999999999"}, ["quantity:型別不符（應為 int）"]),
         ({"amount": "1,000.00"}, ["amount:型別不符（應為 decimal(18,2)）"]),
         ({"amount": "12345678901234567.0"}, ["amount:整數位超過 16 位"]),
-        # 負數、正號、整數寫法都是合法格式（負數金額是 silver 層的品質問題）
-        ({"amount": "-3087159.0"}, []),
+        # 正號、整數寫法是合法格式；負數格式合法，但違反「必須大於 0」（V1）
+        ({"amount": "-3087159.0"}, ["amount:必須大於 0"]),
         ({"amount": "+5"}, []),
         ({"coupon_discount": "-1.0"}, []),
     ],
@@ -240,4 +240,52 @@ def test_unparseable_timestamp_never_reaches_valid(spark):
     ],
 )
 def test_trailing_newline_is_rejected(spark, override, expected):
+    assert _reasons(spark, **override) == expected
+
+
+STATUS_ALLOWED = "order_status:值不在允許範圍（created、paid、cancelled、completed）"
+CURRENCY_ALLOWED = "currency:值不在允許範圍（TWD、NTD、USD、JPY）"
+
+
+@pytest.mark.parametrize(
+    ("override", "expected"),
+    [
+        ({"order_status": "PAID"}, [STATUS_ALLOWED]),  # 大小寫不同
+        ({"order_status": "paid "}, [STATUS_ALLOWED]),  # 結尾空白
+        ({"order_status": "refunded"}, [STATUS_ALLOWED]),
+        ({"currency": "EUR"}, [CURRENCY_ALLOWED]),
+        ({"currency": "usd"}, [CURRENCY_ALLOWED]),
+        ({"currency": "NTD"}, []),  # NTD 是 base 裡 TWD 的別名（V4），保留
+        ({"order_status": "completed", "currency": "TWD"}, []),
+        # 空值只記「必填空值」，不重複記「值不在允許範圍」
+        ({"order_status": ""}, ["order_status:必填空值"]),
+    ],
+)
+def test_allowed_values_are_enforced(spark, override, expected):
+    assert _reasons(spark, **override) == expected
+
+
+def test_order_status_allowed_values_share_state_machine_source():
+    # 合約的允許值直接引用狀態機的 STATUSES，不是另一份清單
+    from pipeline.contracts import ALLOWED_VALUES_KEY
+    from pipeline.order_status import STATUSES
+
+    meta = ORDERS_SCHEMA["order_status"].metadata[ALLOWED_VALUES_KEY]
+    assert meta == list(STATUSES)
+
+
+@pytest.mark.parametrize(
+    ("override", "expected"),
+    [
+        ({"amount": "-5.00"}, ["amount:必須大於 0"]),  # V1：base 有 50 列負數
+        ({"amount": "0"}, ["amount:必須大於 0"]),
+        ({"amount": "-0.00"}, ["amount:必須大於 0"]),
+        ({"amount": "0.01"}, []),
+        # 格式已經錯的值只記型別不符，不重複記「必須大於 0」
+        ({"amount": "-1e2"}, ["amount:型別不符（應為 decimal(18,2)）"]),
+        # coupon 沒有標記 positive：-1.0 是清理規則（轉 NULL），不是合約違規
+        ({"coupon_discount": "-1.0"}, []),
+    ],
+)
+def test_positive_amount_is_enforced(spark, override, expected):
     assert _reasons(spark, **override) == expected
