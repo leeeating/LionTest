@@ -460,3 +460,9 @@ base 有 300 列 coupon = -1.0。AI 指出資料裡本來就有 coupon = 0.0（�
 - **L11 後續快照的內容和前一版完全相同時不開版本**：使用者問「依照DE的角度會怎麼說明」，AI 提供說法，使用者照這段說法回覆當作理由：「SCD2 追蹤的是狀態的變化，不是觀察的次數。用 Type 2 欄位比對變化，沒變就不開版本。這樣維度的粒度正確，重送快照時也保持冪等，這跟 dbt snapshot 的 check 策略相同。」（這段文字由 AI 撰寫，使用者採用）
 
 - 依據：僅 process-log 記錄；L3 的查詢在本 session 實跑（DuckDB 讀 day2 中下單時間為 6 月、且不在 base 的列：60 列、60 個 id、in_base 0）
+
+### 2026-10-19｜Part A｜T6 驗收：T5 驗收者的「狀態倒退」說法是錯的
+
+T5 的驗收者曾說：「base 有 12 列增量事件比 base 那列舊，MERGE 會把 completed 蓋回 paid」。這段話被列為 T6 的必做項目，也寫進了 `t5-review-findings.md`。T6 的實作者實測後提出不同看法，T6 的驗收者再用資料查證，結論是 **T5 驗收者錯了**。它引用的數字本身沒錯，錯在只用 order_id 比對：增量檔和 base 同 order_id 的 1,808 列，會員、下單時間、金額三欄全部不同，屬於撞號（ADR-03），在「與既有 fact 撞號」那一步就被隔離，不會進到 MERGE。例：ORD00058963 在 day1 是 completed、M007192、237376.0，在 base 是 paid、M002193、5016.24。不過「只在 updated_at 較新時覆寫」仍然有必要：L4 的 25 張單是真正的晚到事件，最後都正確維持 cancelled。發現者：T6 實作者先提出，T6 驗收 agent 用資料查證。
+
+- 依據：`notes/part_a/t6-review-round1.md`；更正也補進 `notes/part_a/t5-review-findings.md`
