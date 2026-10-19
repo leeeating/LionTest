@@ -34,6 +34,7 @@
 |---|---|---|---|
 | MERGE 冪等寫入：重跑結果不變 | 📄 [merge-idempotent-write.md](2-incremental-etl/merge-idempotent-write.md) | Part B #9 `write_fact` 的 `mode("append")` | A-2、B |
 | 取每組最新一筆：事件型增量去重 | 📄 [latest-row-per-group.md](2-incremental-etl/latest-row-per-group.md) | Part B #2 `clean_orders` | A-2、B |
+| Delta time travel：讀回舊版本、RESTORE、commit 標記 | 📄 [delta-time-travel.md](2-incremental-etl/delta-time-travel.md) | T6 冪等重跑讀「這批寫入前」的 fact | A-2 |
 | 晚到資料（late-arriving）：本該在前一批出現的資料晚到 | ○ | `notes/dataset/incremental.md`：day2 有 6 列 `updated_at` 早於批次日 | A-2 |
 | 增量檔的時間欄位與批次日不一致（約 70% `updated_at` 晚於批次日，原因未證實） | ○ | `notes/dataset/incremental.md` 的 `updated_at` 分布 | A-2 |
 
