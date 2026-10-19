@@ -466,3 +466,9 @@ base 有 300 列 coupon = -1.0。AI 指出資料裡本來就有 coupon = 0.0（�
 T5 的驗收者曾說：「base 有 12 列增量事件比 base 那列舊，MERGE 會把 completed 蓋回 paid」。這段話被列為 T6 的必做項目，也寫進了 `t5-review-findings.md`。T6 的實作者實測後提出不同看法，T6 的驗收者再用資料查證，結論是 **T5 驗收者錯了**。它引用的數字本身沒錯，錯在只用 order_id 比對：增量檔和 base 同 order_id 的 1,808 列，會員、下單時間、金額三欄全部不同，屬於撞號（ADR-03），在「與既有 fact 撞號」那一步就被隔離，不會進到 MERGE。例：ORD00058963 在 day1 是 completed、M007192、237376.0，在 base 是 paid、M002193、5016.24。不過「只在 updated_at 較新時覆寫」仍然有必要：L4 的 25 張單是真正的晚到事件，最後都正確維持 cancelled。發現者：T6 實作者先提出，T6 驗收 agent 用資料查證。
 
 - 依據：`notes/part_a/t6-review-round1.md`；更正也補進 `notes/part_a/t5-review-findings.md`
+
+### 2026-10-19｜Part A｜重複只算時間上相鄰的相同列
+
+T6 驗收找到規則 5 和狀態機規則的衝突。「除了 updated_at 全部相同就算重複」原本不管兩列在時間上是否相鄰。例如 fact 是 created，同批送來 cancelled@08 → paid@09 → cancelled@10，cancelled@08 會被當成重複刪掉，剩下的 paid → cancelled 看起來合法，cancelled → paid 這個往回走的違規因此被蓋掉。同一秒衝突也會用同樣的方式被蓋掉。AI 建議 A：只有時間上相鄰的相同列才算重複。使用者要求「eli5」，AI 用寄信比喻說明：中間夾了別的信，就不算寄重複。使用者選 A，理由：「中間如果有出現其他狀態 不能當作延遲」。本資料 0 筆，屬於防護性設計。
+
+- 依據：`notes/part_a/t6-review-round1.md`；實作在 T6 修正
