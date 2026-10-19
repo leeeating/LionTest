@@ -472,3 +472,9 @@ T5 的驗收者曾說：「base 有 12 列增量事件比 base 那列舊，MERGE
 T6 驗收找到規則 5 和狀態機規則的衝突。「除了 updated_at 全部相同就算重複」原本不管兩列在時間上是否相鄰。例如 fact 是 created，同批送來 cancelled@08 → paid@09 → cancelled@10，cancelled@08 會被當成重複刪掉，剩下的 paid → cancelled 看起來合法，cancelled → paid 這個往回走的違規因此被蓋掉。同一秒衝突也會用同樣的方式被蓋掉。AI 建議 A：只有時間上相鄰的相同列才算重複。使用者要求「eli5」，AI 用寄信比喻說明：中間夾了別的信，就不算寄重複。使用者選 A，理由：「中間如果有出現其他狀態 不能當作延遲」。本資料 0 筆，屬於防護性設計。
 
 - 依據：`notes/part_a/t6-review-round1.md`；實作在 T6 修正
+
+### 2026-10-19｜Part A｜重跑以「這批寫入前」的版本比對：寫成 ADR-05
+
+T6 的實作者為了讓重跑結果和第一次相同，用 Delta time travel 讀取「這批寫入前」的 fact 來比對。它認為這是方向性設計，問要不要寫成 ADR。使用者先後問了「這兩提是什麼」「eli5」「time travel 怎麼使用」，AI 用記帳本的比喻說明，並實跑範例寫成 learning 筆記。AI 判斷這個機制符合 ADR 的三個條件（難回頭、沒有脈絡會覺得奇怪、有替代方案），建議寫成 ADR，使用者回「ADR-05」。ADR 草稿列出四個選項：time travel、只保證 fact 一致、重跑前 RESTORE、每批另存快照表。決定與理由由使用者撰寫。
+
+- 依據：`decisions/ADR-05-rerun-against-pre-batch-version.md`
