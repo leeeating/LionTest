@@ -8,7 +8,8 @@
   原始值一個字元都不改，型別錯的值也不會在讀取時變成 NULL。
 - 檔案層級問題（檔案不存在、表頭不符、沒有資料列）：讀取時整批報錯，不寫入任何東西。
 - 列層級問題（型別轉不過、Decimal 小數位超過 scale、必填欄位空值或只有空白、
-  欄位數不符、時間字串無法解析、值不在允許範圍、金額不大於 0）：
+  欄位數不符、時間字串無法解析、值不在允許範圍、金額不大於 0、
+  coupon 是 -1.00 以外的負數）：
   validation.cast_to_contract() 把該列分到 rejected 並記下原因，其他列照常處理。
 
 型別原則：
@@ -22,6 +23,8 @@
 """
 
 from __future__ import annotations
+
+from decimal import Decimal
 
 from pyspark.sql.types import (
     DateType,
@@ -42,6 +45,14 @@ ALLOWED_VALUES_KEY = "allowed_values"
 # 欄位 metadata：數值必須大於 0（ADR-02 舉的 CHECK (amount > 0)），否則列進 rejected，
 # 原因「必須大於 0」。由 validation.cast_to_contract 檢查。
 POSITIVE_KEY = "positive"
+
+# 欄位 metadata：數值必須大於或等於 0，但清單裡的特殊值（字串寫的 Decimal）除外，
+# 否則列進 rejected，原因「必須大於或等於 0」。由 validation.cast_to_contract 檢查。
+NON_NEGATIVE_EXCEPT_KEY = "non_negative_except"
+
+# V3：coupon_discount＝-1.00 代表「未知」（資料裡另有 0.0 代表沒有折扣）；合約放行，
+# 由 fact_order._clean_coupon 轉成 NULL（使用者定：「-1 代表未知，轉 NULL 不要猜」）
+COUPON_UNKNOWN = Decimal("-1.00")
 
 # 訂單幣別的允許值（2026-10-18 以 duckdb 查四個訂單檔：base 有 TWD、NTD、USD、JPY，
 # 三天增量只有 TWD、USD、JPY）。NTD 是 base 裡 TWD 的別名（V4，200 列），保留並以匯率 1 換算。
@@ -84,8 +95,15 @@ ORDERS_SCHEMA = StructType(
         ),
         # 必須大於 0（使用者定 V1：「負數在合約層就該擋下」；base 有 50 列負數）
         StructField("amount", AMOUNT_TYPE, False, {POSITIVE_KEY: True}),
-        # 「沒有折扣」也可能以空值表示，不強制
-        StructField("coupon_discount", AMOUNT_TYPE, True),
+        # 「沒有折扣」也可能以空值表示，不強制。
+        # -1.00 以外的負數擋下（使用者定 B：「負數 coupon 沒有合理解釋」）
+        # 〔防護性設計：本資料 0 筆〕
+        StructField(
+            "coupon_discount",
+            AMOUNT_TYPE,
+            True,
+            {NON_NEGATIVE_EXCEPT_KEY: [str(COUPON_UNKNOWN)]},
+        ),
         # 混有 ISO+08:00、Z 結尾（UTC）、YYYY/MM/DD HH:MM:SS（無時區）三種格式 → 保留字串；
         # 決定下單日與匯率日，必填；且必須是三種可解析格式之一，否則下單日會變 NULL
         StructField("order_created_at", StringType(), False, SOURCE_TIMESTAMP_META),

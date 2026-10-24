@@ -44,6 +44,7 @@ from pyspark.sql.types import DecimalType, StringType
 from pipeline.batch_log import BatchCounts, BatchRun, pin_fact_version, run_once
 from pipeline.categories import SKIP_CATEGORIES, Category
 from pipeline.contracts import (
+    COUPON_UNKNOWN,
     FX_RATES_SCHEMA,
     ORDER_CURRENCIES,
     ORDERS_SCHEMA,
@@ -116,15 +117,23 @@ def _commit_marker(batch_id: str) -> str:
     return f"batch:{batch_id}"
 
 
-# V3：coupon_discount＝-1.0 代表「未知」（資料裡另有 0.0 代表沒有折扣），轉成 NULL，
-# 訂單照常寫入（使用者定：「-1 代表未知，轉 NULL 不要猜」）
-COUPON_UNKNOWN = Decimal("-1.00")
+# V3：coupon_discount＝-1.0（contracts.COUPON_UNKNOWN）代表「未知」，轉成 NULL，
+# 訂單照常寫入（使用者定：「-1 代表未知，轉 NULL 不要猜」）。合約只放行 -1.00 這個負數，
+# 其他負數在 ① 合約層隔離。
 _COUPON_NULLED = "_coupon_nulled"
 
-# V2：疑似多乘 1,000 的金額照原樣寫入 fact，另列清單給人工逐筆判斷（使用者定）。
-# 比值＝amount_twd ÷（產品定價 base_price_twd × 數量）；正常列落在 0.84～1.29，
-# 疑似 ×1000 的列約 1,000。門檻 100 取兩者之間，離兩邊都很遠。
+# 金額人工確認清單（amount_review）：照原樣寫入 fact，另列清單給人工逐筆判斷。兩種原因：
+# - V2：疑似多乘 1,000（使用者定）。比值＝amount_twd ÷（產品定價 base_price_twd × 數量）；
+#   正常列落在 0.84～1.29，疑似 ×1000 的列約 1,000。門檻 100 取兩者之間，離兩邊都很遠。
+# - 折扣大於金額：coupon_discount > amount_twd，net_amount_twd 為負（使用者定 B：
+#   「太大的可能是全額折抵」，所以不隔離）。〔防護性設計：本資料 0 筆〕
+# 同一列兩種原因都中時只列一列，review_reasons 依上面的順序列出全部原因。
 AMOUNT_REVIEW_RATIO = Decimal(100)
+REVIEW_REASON_RATIO = (
+    f"amount_ratio:金額比值超過 {AMOUNT_REVIEW_RATIO}（疑似多乘 1,000）"
+)
+REVIEW_REASON_COUPON = "coupon_discount:折扣大於 amount_twd（net_amount_twd 為負）"
+REVIEW_REASONS_COL = "review_reasons"
 AMOUNT_REVIEW_COLUMNS = (
     BATCH_ID_COL,
     "order_id",
@@ -136,6 +145,9 @@ AMOUNT_REVIEW_COLUMNS = (
     "amount_twd",
     "base_price_twd",
     "amount_ratio",
+    "coupon_discount",
+    "net_amount_twd",
+    REVIEW_REASONS_COL,
 )
 
 
@@ -226,6 +238,10 @@ class WarehousePaths:
     @property
     def batch_log(self) -> Path:
         return self.root / "batch_log"
+
+    @property
+    def batch_force_log(self) -> Path:
+        return self.root / "batch_log_force"
 
     @property
     def batch_start(self) -> Path:
@@ -405,19 +421,39 @@ def _clean_coupon(orders: DataFrame) -> DataFrame:
 
 
 def _amount_review(fact: DataFrame, dim_product: DataFrame) -> DataFrame:
-    """V2：比值 amount_twd ÷（base_price_twd × quantity）超過 AMOUNT_REVIEW_RATIO 的 fact 列。
+    """金額人工確認清單：fact 列中命中任一原因的列，每張單一列，review_reasons 列出全部原因。
 
-    產品落到 -1（沒有定價）或定價、數量不是正數時算不出比值，不列入。
+    - V2：比值 amount_twd ÷（base_price_twd × quantity）超過 AMOUNT_REVIEW_RATIO。
+      產品落到 -1（沒有定價）或定價、數量不是正數時算不出比值，不算命中。
+    - coupon_discount > amount_twd（net 為負）。coupon 為 NULL 時不算命中。
+      〔防護性設計：本資料 0 筆〕
     """
     prices = dim_product.select("product_sk", "base_price_twd")
     denom = F.col("base_price_twd") * F.col("quantity")
     ratio = F.when(denom > 0, F.col("amount_twd") / denom)
+    reasons = F.filter(
+        F.array(
+            _reason_if(
+                F.col("amount_ratio") > F.lit(AMOUNT_REVIEW_RATIO), REVIEW_REASON_RATIO
+            ),
+            _reason_if(
+                F.col("coupon_discount") > F.col("amount_twd"), REVIEW_REASON_COUPON
+            ),
+        ),
+        lambda r: r.isNotNull(),
+    )
     return (
         fact.join(prices, "product_sk", "left")
         .withColumn("amount_ratio", F.round(ratio, 2).cast(DecimalType(38, 2)))
-        .filter(F.col("amount_ratio") > F.lit(AMOUNT_REVIEW_RATIO))
+        .withColumn(REVIEW_REASONS_COL, reasons)
+        .filter(F.size(REVIEW_REASONS_COL) > 0)
         .select(*AMOUNT_REVIEW_COLUMNS)
     )
+
+
+def _reason_if(cond: Column, text: str) -> Column:
+    """條件成立時回傳原因字串；不成立或條件為 NULL 時回傳 NULL。"""
+    return F.when(cond, F.lit(text))
 
 
 def _apply_state_machine(
@@ -829,6 +865,8 @@ def run_batch(
         batch_id=batch_id,
         as_of=as_of,
         source_checksum=source.orders_checksum(day),
+        reference_checksums=source.reference_checksums(),
+        force_log_path=paths.batch_force_log,
         run=run,
         force=force,
     )

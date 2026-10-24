@@ -6,6 +6,7 @@ run 用假的函式代替（只回傳對帳數字、記錄被呼叫幾次），�
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from decimal import Decimal
 
 import pytest
@@ -14,7 +15,10 @@ from pipeline.batch_log import (
     BatchOrderError,
     BatchRecord,
     SourceChangedError,
+    _warn_reference_changed,
     completed_batch,
+    forced_runs,
+    pin_fact_version,
     record_completed,
     run_once,
 )
@@ -75,16 +79,20 @@ def files(tmp_path):
     return out
 
 
-def _run(spark, log, files, batch_id, fake, force=False):
+REFS = {"members": "m1", "products": "p1", "fx_rates": "f1"}
+
+
+def _run(spark, log, files, batch_id, fake, force=False, refs=None, now=FIXED_NOW):
     return run_once(
         spark,
         log,
         batch_id=batch_id,
         as_of=AS_OF[batch_id],
         source_checksum=file_sha256([files[batch_id]]),
+        reference_checksums=refs,
         run=fake,
         force=force,
-        now=lambda: FIXED_NOW,
+        now=lambda: now,
     )
 
 
@@ -120,6 +128,18 @@ def test_batch_log_unknown_batch_id(spark, tmp_path, files):
             source_checksum="x",
             run=FakeRun(counts()),
         )
+
+
+def test_batch_log_reference_change_only_warns(caplog):
+    # 使用者定 C：參考資料 checksum 不同只警告；相同時不出聲
+    done = BatchRecord("base", AS_OF["base"], FIXED_NOW, "x", counts(), dict(REFS))
+    with caplog.at_level(logging.WARNING, logger="pipeline.batch_log"):
+        assert _warn_reference_changed(done, REFS) == []
+    assert caplog.records == []
+    with caplog.at_level(logging.WARNING, logger="pipeline.batch_log"):
+        changed = _warn_reference_changed(done, {**REFS, "products": "p2"})
+    assert changed == ["products"]
+    assert "products（p1 → p2）" in caplog.text
 
 
 # ------------------------------------------------------------ 寫 Delta
@@ -199,3 +219,126 @@ def test_batch_log_force_reruns_and_replaces_record(spark, tmp_path, files):
     assert fake.calls == 1 and run.skipped is False
     assert completed_batch(spark, log, "base").counts == counts(20)
     assert spark.read.format("delta").load(str(log)).count() == 1
+
+
+@pytest.mark.slow
+def test_batch_log_reference_change_warns_but_skips(spark, tmp_path, files, caplog):
+    # 使用者定 C：參考資料變了只警告、照常跳過；訂單檔變了仍然丟例外
+    log = tmp_path / "log"
+    first = _run(spark, log, files, "base", FakeRun(counts()), refs=REFS)
+    assert first.record.reference_sha256 == REFS
+    fake = FakeRun(counts())
+    new_refs = {**REFS, "fx_rates": "f2", "members": "m2"}
+    with caplog.at_level(logging.WARNING, logger="pipeline.batch_log"):
+        again = _run(spark, log, files, "base", fake, refs=new_refs)
+    assert again.skipped is True and fake.calls == 0
+    assert "fx_rates（f1 → f2）" in caplog.text and "members（m1 → m2）" in caplog.text
+    assert "products" not in caplog.text
+    # 紀錄不被改寫：仍是第一次的參考資料 checksum
+    assert completed_batch(spark, log, "base").reference_sha256 == REFS
+
+    files["base"].write_text("order_id\nbase-1\nbase-2\n", encoding="utf-8")
+    with pytest.raises(SourceChangedError, match="來源檔被改過"):
+        _run(spark, log, files, "base", FakeRun(counts()), refs=REFS)
+
+
+@pytest.mark.slow
+def test_batch_log_force_leaves_history(spark, tmp_path, files):
+    # 使用者定 C：force 覆寫完成紀錄時，強制重跑紀錄留下舊／新 checksum，只增不改
+    log = tmp_path / "log"
+    force_log = tmp_path / "log_force"  # 沒指定 force_log_path 時的預設位置
+    old_sha = file_sha256([files["base"]])
+    _run(spark, log, files, "base", FakeRun(counts(10)), refs=REFS)
+    assert forced_runs(spark, force_log, "base") == []
+
+    files["base"].write_text("order_id\nbase-1\nbase-2\n", encoding="utf-8")
+    new_sha = file_sha256([files["base"]])
+    new_refs = {**REFS, "products": "p2"}
+    # 兩次 force 的時間不同，forced_runs 依時間排序才有確定的先後
+    for minutes in (1, 2):
+        _run(
+            spark,
+            log,
+            files,
+            "base",
+            FakeRun(counts(20)),
+            force=True,
+            refs=new_refs,
+            now=FIXED_NOW + dt.timedelta(minutes=minutes),
+        )
+
+    runs = forced_runs(spark, force_log, "base")
+    # 每次 force 兩列：run 之前的 started、完成後的 completed
+    assert [r["status"] for r in runs] == ["started", "completed"] * 2
+    assert runs[0] == {
+        "batch_id": "base",
+        # 時間欄讀回來是 session 時區的 naive datetime，不比值，只比先後
+        "forced_at": runs[0]["forced_at"],
+        "status": "started",
+        "logged_at": runs[0]["logged_at"],
+        "previous_completed_at": runs[0]["previous_completed_at"],
+        "previous_source_sha256": old_sha,
+        "new_source_sha256": new_sha,
+        "source_changed": True,
+        "previous_reference_sha256": REFS,
+        "new_reference_sha256": new_refs,
+    }
+    assert {k: v for k, v in runs[1].items() if k not in ("status",)} == {
+        k: v for k, v in runs[0].items() if k not in ("status",)
+    }
+    assert runs[0]["forced_at"] < runs[2]["forced_at"]
+    # 第二次 force：被覆寫的是第一次 force 的結果，訂單檔沒再變
+    assert (runs[2]["previous_source_sha256"], runs[2]["source_changed"]) == (
+        new_sha,
+        False,
+    )
+    assert runs[2]["previous_reference_sha256"] == new_refs
+    # 表本身只增不改：Delta 拒絕 DELETE
+    from delta.tables import DeltaTable
+
+    props = DeltaTable.forPath(spark, str(force_log)).detail().first().properties
+    assert props.get("delta.appendOnly") == "true"
+    with pytest.raises(Exception, match="(?i)append"):
+        DeltaTable.forPath(spark, str(force_log)).delete("batch_id = 'base'")
+    # 完成紀錄仍只有一列，是最新一次的結果
+    rec = completed_batch(spark, log, "base")
+    assert (rec.source_sha256, rec.reference_sha256) == (new_sha, new_refs)
+
+
+@pytest.mark.slow
+def test_pin_fact_version_returns_first_value(spark, tmp_path):
+    # 同一個 batch_id 第二次呼叫回傳第一次記下的版本，不被新的 current_version 蓋掉
+    start = tmp_path / "batch_start"
+    assert pin_fact_version(spark, start, "day1", 3) == 3
+    assert pin_fact_version(spark, start, "day1", 7) == 3
+    # 其他批次各自記錄
+    assert pin_fact_version(spark, start, "day2", 7) == 7
+    assert spark.read.format("delta").load(str(start)).count() == 2
+
+
+@pytest.mark.slow
+def test_batch_log_force_started_is_kept_when_run_fails(spark, tmp_path, files):
+    # 驗收找到的漏洞：force 重跑在 run 中途當掉時（fact 可能已被新內容改寫），
+    # 強制重跑紀錄也要留下痕跡；完成紀錄維持舊的
+    log = tmp_path / "log"
+    force_log = tmp_path / "log_force"
+    old_sha = file_sha256([files["base"]])
+    _run(spark, log, files, "base", FakeRun(counts(10)), refs=REFS)
+    files["base"].write_text("order_id\nbase-1\nbase-2\n", encoding="utf-8")
+    new_sha = file_sha256([files["base"]])
+
+    with pytest.raises(RuntimeError, match="boom"):
+        _run(
+            spark,
+            log,
+            files,
+            "base",
+            FakeRun(RuntimeError("boom")),
+            force=True,
+            refs=REFS,
+        )
+    runs = forced_runs(spark, force_log, "base")
+    assert [
+        (r["status"], r["previous_source_sha256"], r["new_source_sha256"]) for r in runs
+    ] == [("started", old_sha, new_sha)]
+    assert completed_batch(spark, log, "base").source_sha256 == old_sha

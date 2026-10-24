@@ -26,6 +26,13 @@ DEFAULT_DATASET_DIR = (
 
 INCREMENTAL_DAYS = (1, 2, 3)
 
+# 參考資料的名稱（批次紀錄 reference_sha256 的 key）與 CSV 檔名
+REFERENCE_FILES = {
+    "members": "members.csv",
+    "products": "products.csv",
+    "fx_rates": "fx_rates.csv",
+}
+
 
 def file_sha256(paths: Sequence[str | Path]) -> str:
     """檔案內容的 sha256。多個檔依傳入順序串接（每個檔前加檔名與長度，避免邊界混淆）。"""
@@ -71,6 +78,13 @@ class SourceReader(Protocol):
 
     def orders_checksum(self, day: int | None) -> str:
         """一批訂單來源的指紋（day=None 是 base）；批次紀錄用它偵測來源被改過。"""
+        ...
+
+    def reference_checksums(self) -> dict[str, str]:
+        """參考資料（members、products、fx_rates）各自的指紋，key 見 REFERENCE_FILES。
+
+        批次紀錄記下它們；重跑時不同只發警告、不擋（使用者定 C）。
+        """
         ...
 
 
@@ -141,6 +155,12 @@ class CsvSource:
     def orders_checksum(self, day: int | None) -> str:
         return file_sha256([self.orders_path(day)])
 
+    def reference_checksums(self) -> dict[str, str]:
+        return {
+            name: file_sha256([self._dir / filename])
+            for name, filename in REFERENCE_FILES.items()
+        }
+
     def orders_base(self) -> DataFrame:
         return self._read(self.orders_path(None).name, contracts.ORDERS_SCHEMA)
 
@@ -148,10 +168,10 @@ class CsvSource:
         return self._read(self.orders_path(day).name, contracts.ORDERS_SCHEMA)
 
     def members(self) -> DataFrame:
-        return self._read("members.csv", contracts.MEMBERS_SCHEMA)
+        return self._read(REFERENCE_FILES["members"], contracts.MEMBERS_SCHEMA)
 
     def products(self) -> DataFrame:
-        return self._read("products.csv", contracts.PRODUCTS_SCHEMA)
+        return self._read(REFERENCE_FILES["products"], contracts.PRODUCTS_SCHEMA)
 
     def fx_rates(self) -> DataFrame:
-        return self._read("fx_rates.csv", contracts.FX_RATES_SCHEMA)
+        return self._read(REFERENCE_FILES["fx_rates"], contracts.FX_RATES_SCHEMA)

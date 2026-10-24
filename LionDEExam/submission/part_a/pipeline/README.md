@@ -4,7 +4,27 @@ Part A 的管線程式碼。本檔說明各模組負責什麼、對外提供哪�
 
 涵蓋 T3（共用設定、來源讀取、dim_product、dim_date）、T4（dim_member）、T5（fact_order 初始載入、隔離表、對帳）、T6（狀態機、增量處理、批次紀錄、命令列入口）。
 
-## 模組一覽
+## 目錄
+
+- [1. 模組一覽](#1-模組一覽)
+- [2. 用法](#2-用法)
+- [3. 各模組](#3-各模組)
+  - [3.1 session.py](#31-sessionpy)
+  - [3.2 contracts.py](#32-contractspy)
+  - [3.3 sources.py](#33-sourcespy)
+  - [3.4 validation.py](#34-validationpy)
+  - [3.5 delta_io.py](#35-delta_iopy)
+  - [3.6 dims.py](#36-dimspy)
+  - [3.7 dim_member.py](#37-dim_memberpy)
+  - [3.8 order_status.py](#38-order_statuspy)
+  - [3.9 order_status_check.py](#39-order_status_checkpy)
+  - [3.10 categories.py](#310-categoriespy)
+  - [3.11 batch_log.py](#311-batch_logpy)
+  - [3.12 fact_order.py](#312-fact_orderpy)
+  - [3.13 run.py](#313-runpy)
+- [4. 測試](#4-測試)
+
+## 1. 模組一覽
 | 模組 | 負責 | 主要對外介面 |
 |---|---|---|
 | `session.py` | 建立 SparkSession | `build_spark()`、`SESSION_TIMEZONE` |
@@ -18,13 +38,13 @@ Part A 的管線程式碼。本檔說明各模組負責什麼、對外提供哪�
 | `order_status.py` | 訂單狀態機的 domain 定義：狀態值、合法一步轉移、可達性 | `STATUSES`、`TRANSITIONS`、`REACHABLE`、`reachable()`、`skips_intermediate()` |
 | `order_status_check.py` | 一批事件的狀態機分類（純 DataFrame 轉換） | `classify_status_events()`、`split_by_disposition()`、`StateCategory` |
 | `categories.py` | 隔離表分類（`reject_category`）的唯一一份定義 | `Category`、`SKIP_CATEGORIES`、`QUARANTINE_CATEGORIES` |
-| `batch_log.py` | 批次紀錄：依序執行、已完成就跳過、來源被改過就報錯；記下每批開始前的 fact 版本 | `run_once()`、`pin_fact_version()`、`BatchCounts`、`BatchRecord`、`BATCH_ORDER`、`BatchOrderError`、`SourceChangedError` |
+| `batch_log.py` | 批次紀錄：依序執行、已完成就跳過、訂單來源被改過就報錯、參考資料變了只警告、force 留紀錄；記下每批開始前的 fact 版本 | `run_once()`、`pin_fact_version()`、`record_forced()`、`forced_runs()`、`BatchCounts`、`BatchRecord`、`BATCH_ORDER`、`BatchOrderError`、`SourceChangedError` |
 | `fact_order.py` | 一批訂單的處理入口：維度更新、fact_order、隔離表、對帳；依序跑完全部批次 | `transform_order_batch()`、`load_order_batch()`、`load_base()`、`load_incremental()`、`run_batch()`、`run_all()`、`WarehousePaths`、`BatchReconciliation`、`find_batch_collisions()`、`find_existing_collisions()`、`ReferenceDataError` |
 | `run.py` | 命令列入口（`python -m pipeline.run`） | `main()` |
 
 模組間的 import：`contracts` 用 `timeparse`、`order_status`；`sources` 用 `contracts`；`validation` 用 `contracts`、`timeparse`；`dims` 用 `contracts`、`sources`、`delta_io`、`timeparse`；`dim_member` 用 `contracts`、`validation`、`delta_io`；`order_status_check` 用 `order_status`、`categories`；`fact_order` 用 `batch_log`、`categories`、`contracts`、`validation`、`delta_io`、`timeparse`、`dims`、`dim_member`、`order_status_check`、`sources`；`run` 用 `fact_order`、`batch_log`、`session`、`sources`。`session`、`delta_io`、`timeparse`、`order_status`、`categories`、`batch_log` 不依賴其他模組。
 
-## 用法
+## 2. 用法
 ```python
 from pipeline.contracts import ORDERS_SCHEMA, PRODUCTS_SCHEMA
 from pipeline.dims import all_orders, write_dim_date, write_dim_product
@@ -56,9 +76,9 @@ for run in run_all(spark, source, WarehousePaths("/tmp/liontest/wh")):
 命令列（印出每批對帳）：在 `part_a/` 底下執行 `uv run python -m pipeline.run --out /tmp/liontest/wh`；資料目錄用 `--data-dir` 或環境變數 `LIONTEST_DATA_DIR`，輸出目錄也可以用 `LIONTEST_OUT`。`--force` 會強制重跑已完成的批次。
 輸出路徑由呼叫端決定，模組內不寫死。
 
-## 各模組
+## 3. 各模組
 
-### session.py
+### 3.1 session.py
 `build_spark()` 啟用 Delta，並固定以下設定：
 
 | 設定 | 值 | 原因 |
@@ -69,7 +89,7 @@ for run in run_all(spark, source, WarehousePaths("/tmp/liontest/wh")):
 | `spark.driver.memory` | `2g` | local 模式的 driver 也負責計算；預設 1g 時，全套測試在同一個 session 連跑多次十萬列的完整流程會 `Java heap space`（2026-10-19 實測） |
 | `spark.driver.host`、`spark.driver.bindAddress` | `localhost`、`127.0.0.1` | 不設時 driver 用區網 IP 宣告位址；task 結果較大（例如 collect 十萬列）時要透過這個位址傳回，斷網或換網路時 IP 消失就失敗（T6 驗收推測的 flaky 原因，未重現斷網）。Docker 用 `--network none` 時要加 `--hostname localhost` 也是同一件事 |
 
-### contracts.py
+### 3.2 contracts.py
 每個來源的欄名、型別、是否必填都寫成 `StructType` 常數，是全專案唯一一份合約；讀取用的全字串 schema 由 `to_raw_schema()` 從合約自動產生，不另外手寫。
 
 - **必填欄位用 `nullable=False` 標示**：空值時這一列無法被正確處理或歸屬的欄位才設為必填（例如 orders 的 order_id、member_id、product_id、amount、updated_at；members 的 register_date、extract_date；fx_rates 全部）。理由寫在各欄旁邊。目前資料中沒有任何空值，必填清單是依語意決定。
@@ -78,11 +98,12 @@ for run in run_all(spark, source, WarehousePaths("/tmp/liontest/wh")):
 - **格式不一致的欄位讀成字串**：例如 `order_created_at` 混用三種時間格式，先保留原樣，再用 `parse_source_timestamp()` 解析。
 - **允許值放在欄位 metadata（`ALLOWED_VALUES_KEY`）**：`order_status` 只能是 created、paid、cancelled、completed，清單直接引用 `order_status.STATUSES`（和狀態機同一份）；`currency` 只能是 `ORDER_CURRENCIES`＝TWD、NTD、USD、JPY（2026-10-18 以 duckdb 查四個訂單檔：base 四種都有，三天增量只有 TWD、USD、JPY）。NTD 是 base 裡 TWD 的別名（V4，200 列），保留並以匯率 1 換算。比對是完全比對，大小寫、前後空白不同都算違規。新幣別要先確認匯率表有提供再加進來；沒加之前整列以合約違規隔離，不會變成「找不到匯率」。〔防護性設計：本資料 0 筆〕
 - **金額必須大於 0 放在欄位 metadata（`POSITIVE_KEY`）**：`amount` 不大於 0 的列以「amount:必須大於 0」進 rejected（V1，使用者定：「負數在合約層就該擋下」；base 50 列）。`coupon_discount` 沒有這個標記：-1.0 是清理規則（轉 NULL），不是合約違規。
+- **coupon 不可為 -1 以外的負數，放在欄位 metadata（`NON_NEGATIVE_EXCEPT_KEY`）**：`coupon_discount` 小於 0 且不是 `COUPON_UNKNOWN`（-1.00）的列，以「coupon_discount:必須大於或等於 0（-1.00 除外）」進 rejected（使用者定 B：「負數 coupon 沒有合理解釋」）。-1 以 Decimal 比較，`-1`、`-1.0`、`-1.00` 都放行。〔防護性設計：本資料 0 筆〕
 
-### sources.py
+### 3.3 sources.py
 `SourceReader` 是來源介面，每個來源表對應一個方法：`orders_base()`、`orders_incremental(day)`、`members()`、`products()`、`fx_rates()`。現在只有 CSV 實作 `CsvSource`；之後換成從 SQL DB 讀，只要新增一個實作同一組方法的類別（ADR-02）。
 
-另有 `orders_checksum(day)`：一批訂單來源的指紋（`day=None` 是 base），批次紀錄用它偵測已完成的批次來源被改過。`CsvSource` 用訂單檔的 sha256（`file_sha256()`）實作，並公開 `dataset_dir` 與 `orders_path(day)`。
+另有 `orders_checksum(day)`：一批訂單來源的指紋（`day=None` 是 base），批次紀錄用它偵測已完成的批次來源被改過。`reference_checksums()`：參考資料（`members`、`products`、`fx_rates`，檔名見 `REFERENCE_FILES`）各自的指紋，批次紀錄記下、重跑時不同只警告。`CsvSource` 都用檔案的 sha256（`file_sha256()`）實作，並公開 `dataset_dir` 與 `orders_path(day)`。
 
 讀取方法回傳的 DataFrame 中，合約欄位**全部是原始字串**，另外多一欄 `_source_error`。讀取層不轉型，所以型別錯的值不會在讀取時被轉成 NULL 或被四捨五入。
 
@@ -97,12 +118,13 @@ for run in run_all(spark, source, WarehousePaths("/tmp/liontest/wh")):
 
 檔案層級的檢查用 `spark.read.text(...).take()` 立即讀出檔案開頭來比對。列層級的欄位數檢查依賴 `build_spark()` 關掉 CSV column pruning（見 session.py 一節）；自己建 SparkSession 時要記得加這個設定，否則 `count()` 會把壞列算成 valid。
 
-### validation.py
+### 3.4 validation.py
 `cast_to_contract(df, schema, *, passthrough=())` 回傳 `(valid_df, rejected_df)`，是唯一的轉型入口，fact_order 的隔離表也用它。
 
 - **valid_df**：沒有違規的列，欄名、欄序、型別與合約相同。
 - **rejected_df**：有違規的列，保留所有原始字串欄位（含 `_source_error`），加上 `reject_reasons`（字串陣列，一列有多個原因時全部列出，格式「欄名:原因」）。
 - **筆數守恆**：兩者用同一個條件切開，valid 筆數＋rejected 筆數＝輸入筆數，之後對帳「輸入＝寫入＋隔離」靠這一點。
+- **每列的錯誤只算一次**：先算出每列的 `reject_reasons`，做一次 `localCheckpoint(eager=False)`（第一個用到的 action 才計算並存起來），valid 與 rejected 都從存好的結果依陣列是否為空切開。不這樣做時兩者是兩條獨立的查詢，每個 action 都從輸入重跑全部 regex／try_cast 檢查。函式本身不呼叫 action、不計算檢查結果；但建立 checkpoint 時要先產生輸入的 RDD，輸入的查詢含 shuffle（join、groupBy 等）時，AQE 會在這時先執行 shuffle 階段的 job（管線傳進來的是剛讀的 CSV，沒有 shuffle）。存起來的資料在 valid、rejected 不再被引用後由 Spark 的 ContextCleaner 回收，沒有另外的釋放介面。
 - **`passthrough`**（關鍵字參數，預設空）：指定的欄位原樣附在 valid 的合約欄位之後。fact_order 用它把整列原始字串（`_raw`）帶到後面的步驟，之後任何一步隔離時都能寫回上游送來的原值，而不是轉型後的值（例如 `122549.0` 轉 Decimal 再轉回字串會變成 `122549.00`）。
 
 `strict_date(col)`：原始字串依合約的日期規則（`yyyy-MM-dd` 且日期存在）轉成 DateType，不符合時為 NULL。cast_to_contract 判斷日期欄位用的就是它；合約以外需要先看日期的地方（例如 dim_member 依 extract_date 過濾）也用它，不要用 try_cast，因為 try_cast 會把 `"2026-07-15 junk"` 當成 07-15。
@@ -119,12 +141,13 @@ for run in run_all(spark, source, WarehousePaths("/tmp/liontest/wh")):
 | 時間字串無法解析：合約 metadata 標記 `source_timestamp` 的欄位（`order_created_at`、`updated_at`），必須能被 `parse_source_timestamp()` 解析 | `order_created_at:時間格式無法解析（應為 …）` |
 | 值不在允許範圍：合約 metadata 標記 `allowed_values` 的欄位（`order_status`、`currency`） | `currency:值不在允許範圍（TWD、NTD、USD、JPY）` |
 | 數值不大於 0：合約 metadata 標記 `positive` 的欄位（`amount`）；格式已經錯的值只記型別不符 | `amount:必須大於 0` |
+| 數值小於 0 且不是例外值：合約 metadata 標記 `non_negative_except` 的欄位（`coupon_discount`，例外值 -1.00）；格式已經錯的值只記型別不符〔防護性設計：本資料 0 筆〕 | `coupon_discount:必須大於或等於 0（-1.00 除外）` |
 
 時間格式規則和 `parse_source_timestamp()` 共用 `timeparse.SOURCE_TIMESTAMP_FORMATS` 這一份定義，所以進得了 valid 的列，下單時間一定解析得出來，dim_date 的範圍和 fact 的 date_sk 不會因為 NULL 而悄悄漏掉。`updated_at` 目前資料全是 `+08:00` 格式，比照辦理是因為增量判斷新舊靠它，解析不了就無法比較。
 
 不靠 Spark 的 `try_cast` 判斷，因為它很寬鬆，實測：`100.456` 轉 `DECIMAL(18,2)` 得到 `100.46`、`1e2` 得到 `100.00`、`' 3'` 轉 INT 得到 `3`、`2026-06-25T14:02:16+08:00` 轉 DATE 得到 `2026-06-25`，全部不報錯。
 
-### delta_io.py
+### 3.5 delta_io.py
 `merge_upsert(spark, df, path, keys, *, update_condition=None, commit_marker=None)`：依 `keys` 把 `df` MERGE 進 `path` 的 Delta 表。比對到的列整列覆寫，沒比對到的新增；表不存在時直接建立。同一份輸入重跑，結果不變。
 - `update_condition`：比對到時只有條件成立才覆寫（目標表別名 `t`、來源 `s`）。fact_order 用 `s.updated_at > t.updated_at`，舊事件不會蓋掉新狀態。
 - `commit_marker`：寫進這次 commit 的 `userMetadata`（Delta history 查得到），fact_order 用它標出哪一批寫了哪個版本，只作稽核。注意：來源是空的 MERGE 不會產生 commit，也就沒有標記，所以不能拿標記來找「某批之前的版本」（見 batch_log.py 的 `pin_fact_version`）。
@@ -133,7 +156,7 @@ for run in run_all(spark, source, WarehousePaths("/tmp/liontest/wh")):
 
 **注意：呼叫前，`df` 的 `keys` 必須唯一。** 來源同一個 key 有多列，而目標表還沒有這個 key 時，Delta 會把多列全部插入，不會報錯（Part B 的 E12）。
 
-### dims.py
+### 3.6 dims.py
 **dim_product**
 - `write_dim_product(spark, products, path)`：`products` 是 `cast_to_contract(source.products(), PRODUCTS_SCHEMA)` 的 valid_df。建表並以 `product_id` MERGE。主檔的每個產品一列，另外加一列「未知產品」（`UNKNOWN_PRODUCT_ID = "UNKNOWN"`、`UNKNOWN_PRODUCT_SK = -1`）。
 - 主檔的 `product_id` 重複時丟 `DuplicateKeyError`，整批停下：主檔沒有更新時間之類的欄位可以判斷哪一列較新，任選一列會讓結果隨讀取順序改變。經由 `fact_order.load_order_batch()` 呼叫時，會轉成 `ReferenceDataError`（見 fact_order.py 一節）。
@@ -155,7 +178,7 @@ for run in run_all(spark, source, WarehousePaths("/tmp/liontest/wh")):
 | 結尾 `Z` | UTC，換算成台北時間 |
 | `YYYY/MM/DD HH:MM:SS` | 沒有時區標記，視為台北時間（已定案，見 process-log） |
 
-### dim_member.py
+### 3.7 dim_member.py
 **規則**（已定案，見 process-log「dim_member SCD2 規則」）
 - 依 extract_date 由舊到新處理。會員沒出現在某一批就沿用前一版；內容沒變不開新版。
 - `member_level`、`city` 是 Type 2，值變就開新版；`member_name`、`birth_date` 是 Type 1，覆寫該會員所有版本。
@@ -189,7 +212,7 @@ for day in [date(2026, 4, 30), date(2026, 5, 31), date(2026, 6, 30)]:
 - 每位會員記錄「已處理到哪一批快照」。快照列的 `extract_date` 小於或等於這個值時直接跳過，所以重跑不會多開版本，重送舊檔也不會把會員「改回去」。
 - 副作用：判斷是**以會員為單位**。某一批遲到（例如 04-30、06-30 處理完才送來 05-31），這批只會套用到「06-30 沒出現」的會員，這些會員的結果和依序處理相同；06-30 有出現的會員，05-31 那一列會被跳過，中間那段歷史就遺失了（例如 05-31 升金卡、06-30 又降回一般，表裡看不到金卡那一版）。要避免，得在批次層級確保依序處理（T6 的批次紀錄）。
 
-### order_status.py
+### 3.8 order_status.py
 訂單狀態機的 domain 定義，回傳 Spark 運算式，不用 Python UDF。
 
 - `STATUSES`：created、paid、cancelled、completed。也是合約中 `order_status` 允許值的唯一來源。
@@ -198,7 +221,7 @@ for day in [date(2026, 4, 30), date(2026, 5, 31), date(2026, 6, 30)]:
 - `SKIPS`：可達、但不是一步轉移也不是自我轉移，也就是跳過中間狀態。依目前規則只有 created→completed。
 - `reachable(from_col, to_col)`、`skips_intermediate(from_col, to_col)`、`is_known_status(col)`：遇到未知值或 NULL 一律回傳 False，不回傳 NULL。
 
-### order_status_check.py
+### 3.9 order_status_check.py
 `classify_status_events(events, fact_state, *, tiebreak=None)`：替一批事件的每一列加上 `state_category`、`state_reason`、`state_skipped`。輸入是經過格式、撞號、去重處理的事件，以及既有 fact 的 `(order_id, order_status, updated_at)`；第一批沒有 fact 時傳 None。規則已定案，見 process-log「狀態機檢查採 C」「狀態檢查一律用可達性」「同一秒內出現不同狀態」「不合法轉移之後的事件一起隔離」：
 
 | 情況 | 分類 | 去向 |
@@ -216,24 +239,30 @@ for day in [date(2026, 4, 30), date(2026, 5, 31), date(2026, 6, 30)]:
 - 未知狀態值已在合約擋下。萬一繞過合約，未知值走不到也走不出任何狀態，在鏈上會歸 `illegal_transition`，晚到時歸 `late_event_conflict`，不會寫進 fact。
 - `split_by_disposition(classified)`：依去向拆成 accepted／quarantined／skipped 三份。
 
-### categories.py
+### 3.10 categories.py
 隔離表 `reject_category` 的唯一一份定義（`Category`），fact_order 與狀態機共用。`SKIP_CATEGORIES`＝{`late_event`}：存在隔離表、但不是錯誤，對帳時和隔離分開計數（使用者定：狀況外的事件統一留紀錄）。其餘都在 `QUARANTINE_CATEGORIES`。
 
-### batch_log.py
-一張 Delta 表（`WarehousePaths.batch_log`），每批完成時**最後**寫一列：`batch_id`、`as_of`、`completed_at`（UTC）、`source_sha256`，以及 `BatchCounts` 的所有對帳數字（輸入、寫入、隔離、略過、各類隔離筆數、跳過中間狀態筆數、amount_twd 總和、-1 筆數、寫入後整表筆數與總和、會員違規列數）。
+### 3.11 batch_log.py
+一張 Delta 表（`WarehousePaths.batch_log`），每批完成時**最後**寫一列，欄位和 `BATCH_LOG_SCHEMA` 一致：
+- `batch_id`、`as_of`、`completed_at`（UTC）
+- `source_sha256`：這批訂單檔的 checksum
+- `reference_sha256`（MAP<STRING,STRING>）：參考資料 `members`、`products`、`fx_rates` 各自的 checksum（使用者定 C）
+- `BatchCounts` 的所有對帳數字：`input_rows`、`fact_rows`、`skipped_rows`、`quarantined_rows`、`quarantined_by_category`、`skipped_intermediate_rows`、`coupon_nulled_rows`、`amount_review_rows`、`amount_twd_sum`、`net_amount_twd_sum`、`unknown_product_rows`、`unknown_member_rows`、`fact_table_rows`、`fact_table_amount_twd_sum`、`fact_table_net_amount_twd_sum`、`member_rejected_rows`（各欄意義見 fact_order.py 一節的 `BatchReconciliation`）
 
-`run_once(spark, log_path, *, batch_id, as_of, source_checksum, run, force=False)`：
-1. 已完成、checksum 相同 → 不執行，回傳既有紀錄（`BatchRun.skipped=True`）。
-2. 已完成、checksum 不同 → `SourceChangedError`，代表來源檔被改過，不默默跳過。
+`run_once(spark, log_path, *, batch_id, as_of, source_checksum, run, reference_checksums=None, force_log_path=None, force=False)`：
+1. 已完成、訂單檔 checksum 相同 → 不執行，回傳既有紀錄（`BatchRun.skipped=True`）。參考資料 checksum 和紀錄不同時只發警告（`logging` 的 WARNING，列出哪個檔從哪個 checksum 變成哪個），照常跳過（使用者定 C）。參考資料是整份快照、每批都讀同一份檔，之後的批次本來就會讀到新版本；只有訂單檔代表「這一批」本身。
+2. 已完成、訂單檔 checksum 不同 → `SourceChangedError`，代表來源檔被改過，不默默跳過。
 3. 前面的批次沒完成 → `BatchOrderError`，在呼叫 `run` 之前丟出，什麼都還沒寫。順序是 `BATCH_ORDER`＝base → day1 → day2 → day3。原因：dim_member 用 `last_seen_extract_date` 擋重送，判斷以會員為單位，順序亂掉會遺失中間那段會員歷史（見 dim_member.py 一節）。
 4. 呼叫 `run()`，最後寫完成紀錄。`run` 中途丟例外時不寫紀錄，下次重跑整批。
-5. `force=True`：已完成也照跑一次並覆寫紀錄，給冪等證明用。**force 不比對 checksum**：來源被改過時，會用新內容覆寫這批的結果。
+5. `force=True`：已完成也照跑一次並覆寫紀錄，給冪等證明用。**force 不比對 checksum**：來源被改過時，會用新內容覆寫這批的結果。覆寫既有紀錄時，**呼叫 `run` 之前**先在**強制重跑紀錄**追加一列 `started`（`record_forced`），寫完新的完成紀錄後再追加 `completed`，事後看得出這批被 force 過、覆寫了什麼（使用者定 C：「要避免訂單狀態可以被隨意修改 如果要修改需要使用 force 來紀錄」）。`run` 中途丟例外時不寫完成紀錄，但 `started` 已經留下：fact 可能已被新內容改寫（例如 MERGE 之後當掉），即使之後把來源檔改回、一般重跑被跳過，仍查得到這次 force（T6 follow-up 驗收找到的漏洞）。
+
+強制重跑紀錄：一張只增不改的 Delta 表（`WarehousePaths.batch_force_log`＝`batch_log_force`；直接呼叫 `run_once` 沒給 `force_log_path` 時是 `<log_path>_force`），建立時設表屬性 `delta.appendOnly=true`，UPDATE、DELETE 會被 Delta 拒絕，「只增不改」由表本身保證。每次 force 兩列（`started`、`completed`，同一個 `forced_at`）；只有 `started` 代表那次 force 沒有完成。欄位（`BATCH_FORCE_LOG_SCHEMA`）：`batch_id`、`forced_at`（這次 force 開始的時間）、`status`、`logged_at`、`previous_completed_at`、`previous_source_sha256`、`new_source_sha256`、`source_changed`、`previous_reference_sha256`、`new_reference_sha256`。`forced_runs(spark, force_log_path, batch_id)` 依時間列出某批的紀錄（同一次 force 的 started 排在 completed 前）。完成紀錄（`batch_log`）仍是每批一列、存最新一次的結果；另存一張表而不是在 `batch_log` 加欄位，是因為同一批可能被 force 多次，欄位只留得住最後一次。第一次執行就帶 `--force`（沒有既有紀錄可覆寫）不寫強制重跑紀錄。
 
 **為什麼冪等要靠批次紀錄，不能只靠 fact**：重跑同一批時，fact 已經是這批的結果，這批每列都會變成晚到事件，分類和第一次不同。所以已完成的批次直接跳過。當掉後重跑、強制重跑時，則由 fact_order 拿「這批開始之前」的 fact 來比對（見下一段與 fact_order.py 一節）。
 
 `pin_fact_version(spark, start_path, batch_id, current_version)`：一張 Delta 表（`WarehousePaths.batch_start`），每批一列 `batch_id`、`fact_version_before`、`started_at`。第一次呼叫時記下傳入的目前版本（fact 還不存在時是 -1），之後都回傳記下的值。fact_order 在寫任何 fact、隔離表之前呼叫它，所以當掉也不會漏記。不從 Delta history 找 commit 標記，是因為這批寫進 fact 的列為 0 時 MERGE 不產生 commit（T6 驗收找到的漏洞）。
 
-### fact_order.py
+### 3.12 fact_order.py
 **規則**（已定案，見 process-log 與 ADR-03、ADR-04）
 - 粒度：一張訂單一列、存最新狀態，以 `order_id` MERGE。
 - 新舊以 `updated_at` 判斷（J6）。fact 只在 `updated_at` 較新時覆寫：MERGE 條件是 `FACT_UPDATE_CONDITION`＝`s.updated_at > t.updated_at`，是狀態機之外的第二道防線。
@@ -242,7 +271,7 @@ for day in [date(2026, 4, 30), date(2026, 5, 31), date(2026, 6, 30)]:
 - 金額：存 `amount`（折扣前，J10）、`currency`（原值）、`amount_twd`、`net_amount_twd`（＝`amount_twd − coupon_discount`，coupon 是台幣）。`amount_twd` 用**台北下單日**當天的匯率。TWD、NTD 固定 1（`TWD_PEGGED_CURRENCIES`），匯率表用 left join，所以沒有匯率列的 TWD 不會遺失（`buggy_pipeline.py` 用 inner join 弄丟了 TWD）。其他幣別找不到當天匯率就進隔離表，不用前一天的匯率代替。
 - 產品清單有違規列或 `product_id` 重複、匯率表有違規列或同日同幣別重複：丟 `ReferenceDataError`，在寫任何表之前停下，fact、隔離表、維度、批次紀錄都不寫。product_id 重複原本是 dim_product 的 `DuplicateKeyError`，這裡統一轉成 `ReferenceDataError`，原例外保留在 `__cause__`。
 - product_id 不在清單、會員對不到版本：sk 落到 -1，對帳另列筆數。
-- A-3 定案：負數金額在合約擋下（`contract`，「amount:必須大於 0」）；coupon＝-1.0（`COUPON_UNKNOWN`）代表未知，在 ① 之後轉成 NULL、照常寫入，筆數記在對帳 `coupon_nulled_rows`；疑似多乘 1,000 照原樣寫入，另列 V2 人工確認清單（見下方 `amount_review`）；completed 但出發日未到只記錄。品質規則的掛載點是 `ORDER_QUALITY_RULES`，目前是空的。每條規則的型別是 `Callable[[dt.date], Column]`：收這批的 `as_of`，回傳原因字串，不違規時為 NULL。命中的列以 `quality` 類別進隔離表，一列命中多條時原因全部列出。
+- A-3 定案：負數金額在合約擋下（`contract`，「amount:必須大於 0」）；coupon＝-1.0（`contracts.COUPON_UNKNOWN`）代表未知，在 ① 之後轉成 NULL、照常寫入，筆數記在對帳 `coupon_nulled_rows`；coupon 是 -1 以外的負數在合約擋下（「coupon_discount:必須大於或等於 0（-1.00 除外）」）〔防護性設計：本資料 0 筆〕；疑似多乘 1,000、coupon 大於 amount_twd（net 為負）都照原樣寫入，另列金額人工確認清單（見下方 `amount_review`）；completed 但出發日未到只記錄。品質規則的掛載點是 `ORDER_QUALITY_RULES`，目前是空的。每條規則的型別是 `Callable[[dt.date], Column]`：收這批的 `as_of`，回傳原因字串，不違規時為 NULL。命中的列以 `quality` 類別進隔離表，一列命中多條時原因全部列出。
 
 **一批的處理順序**（`transform_order_batch`，純轉換）
 ```
@@ -258,21 +287,21 @@ for day in [date(2026, 4, 30), date(2026, 5, 31), date(2026, 6, 30)]:
  ⑥ 換算 amount_twd             → 隔離：fx_missing
  ⑦ 品質規則（A-3，目前沒有）     → 隔離：quality
  ⑧ 對維度（product_sk、member_sk、date_sk）、算 net_amount_twd
-    V2 清單：寫入列中比值 > 100 的列（不隔離）
+    金額人工確認清單：寫入列中比值 > 100 或 coupon > amount_twd 的列（不隔離）
 寫 dim_date（① 的合格列）
 記下這批開始前的 fact 版本（batch_start，只在第一次記）
-對帳（輸入＝寫入＋隔離＋略過，不平就丟 ReconciliationError、不寫入）→ 寫隔離表 → 寫 V2 清單 → MERGE fact
+對帳（輸入＝寫入＋隔離＋略過，不平就丟 ReconciliationError、不寫入）→ 寫隔離表 → 寫金額人工確認清單 → MERGE fact
 ```
 每一步淘汰的列都帶著類別（`reject_category`）與原因進隔離表，所以各類別互斥，加總等於輸入。dim_date 用 ① 的合格列擴充，所以被 ②～⑦ 隔離的訂單的日期也會在 dim_date 裡。
 
-**和哪一版的 fact 比**：④ 撞號與 ⑤ 狀態機都和「這批開始之前」的 fact 比（`_fact_before_batch`）。第一次跑時記下當時 fact 的版本（`batch_log.pin_fact_version`）；當掉後重跑、強制重跑時沿用記下的版本，用 time travel 讀出來。這樣重跑的分類和第一次相同，隔離表與 V2 清單的 replaceWhere 也會寫回相同內容。限制：對 fact 執行 VACUUM 後舊版本的檔案被刪，重跑會報錯；超過 Delta log 保存期限（預設 30 天）後舊版本也讀不到。
+**和哪一版的 fact 比**：④ 撞號與 ⑤ 狀態機都和「這批開始之前」的 fact 比（`_fact_before_batch`）。第一次跑時記下當時 fact 的版本（`batch_log.pin_fact_version`）；當掉後重跑、強制重跑時沿用記下的版本，用 time travel 讀出來。這樣重跑的分類和第一次相同，隔離表與金額人工確認清單的 replaceWhere 也會寫回相同內容。限制：對 fact 執行 VACUUM 後舊版本的檔案被刪，重跑會報錯；超過 Delta log 保存期限（預設 30 天）後舊版本也讀不到。
 
 **對外函式**
 - `transform_order_batch(orders, *, batch_id, as_of, fx, dim_product, dim_member, existing)`：①～⑧ 的純轉換，不寫 Delta、不觸發計算，回傳 `BatchTransform(valid, fact, quarantine)`；`fact` 多帶一欄 `state_skipped`。測試直接驗它。
 - `load_order_batch(spark, source, *, batch_id, orders, as_of, paths)`：處理一批（參考資料檢查、寫維度、轉換、對帳、寫入），回傳 `BatchReconciliation`。不檢查批次順序、不寫批次紀錄。
   - `batch_id`：寫進 fact 與隔離表；隔離表依它 replaceWhere。只接受英數、底線、連字號，因為它會被拼進 replaceWhere 的條件。
   - `as_of`：這批的業務日期，當 `write_dim_member` 的 `through`，會員快照只看到這天為止。dim_date 只依這批訂單擴充（和既有範圍取聯集），不偷看之後的增量。
-  - `paths`：`WarehousePaths(root)`，各表放在 root 底下：`fact_order`、`quarantine_order`、`amount_review`、`dim_product`、`dim_member`、`dim_date`、`batch_log`、`batch_start`。
+  - `paths`：`WarehousePaths(root)`，各表放在 root 底下：`fact_order`、`quarantine_order`、`amount_review`、`dim_product`、`dim_member`、`dim_date`、`batch_log`、`batch_log_force`（`batch_force_log`）、`batch_start`。
 - `load_base(spark, source, paths)`：`batch_id="base"`、`as_of=2026-06-30`。
 - `load_incremental(spark, source, day, paths)`：`batch_id="day{day}"`、`as_of=INCREMENTAL_AS_OF[day]`（07-01～07-03）。
 - `run_batch(spark, source, paths, day, *, force=False)`：用 `batch_log.run_once` 包住一批（`day=None` 是 base）。
@@ -307,9 +336,11 @@ for day in [date(2026, 4, 30), date(2026, 5, 31), date(2026, 6, 30)]:
 - `reject_category`：`contract`、`collision`、`duplicate`、`collision_existing`、`superseded`、`late_event`（略過）、`late_event_conflict`、`illegal_transition`、`ambiguous_order`、`after_illegal`、`fx_missing`、`quality`。
 - 寫入：`replaceWhere batch_id = '<batch_id>'`，先清掉同一批的舊資料再寫，重跑不會變兩份，其他批不受影響。
 
-**V2 人工確認清單 `amount_review`**（使用者定：疑似多乘 1,000 照原樣寫入，另列清單逐筆判斷）
-- 一張 Delta 表，欄位：`batch_id`、`order_id`、`product_id`、`quantity`、`currency`、`amount`、`fx_rate`、`amount_twd`、`base_price_twd`、`amount_ratio`。
-- 內容：這批寫進 fact 的列中，`amount_ratio`＝`amount_twd ÷（base_price_twd × quantity）`（四捨五入到 2 位）大於 `AMOUNT_REVIEW_RATIO`＝100 的列。正常列的比值落在 0.84～1.29，疑似多乘 1,000 的約 1,000，門檻取兩者之間。產品落到 -1 時沒有定價，算不出比值，不列入。
+**金額人工確認清單 `amount_review`**（使用者定：疑似多乘 1,000、折扣大於金額都照原樣寫入，另列清單逐筆判斷）
+- 一張 Delta 表，欄位：`batch_id`、`order_id`、`product_id`、`quantity`、`currency`、`amount`、`fx_rate`、`amount_twd`、`base_price_twd`、`amount_ratio`、`coupon_discount`、`net_amount_twd`、`review_reasons`（ARRAY<STRING>）。
+- 內容：這批寫進 fact 的列中，命中下面任一原因的列，**每張單一列**；兩種都命中時 `review_reasons` 依下面的順序列出兩個原因（不拆成兩列，清單筆數＝要人看的訂單數）。
+  - V2（`REVIEW_REASON_RATIO`）：`amount_ratio`＝`amount_twd ÷（base_price_twd × quantity）`（四捨五入到 2 位）大於 `AMOUNT_REVIEW_RATIO`＝100。正常列的比值落在 0.84～1.29，疑似多乘 1,000 的約 1,000，門檻取兩者之間。產品落到 -1 時沒有定價，算不出比值，不算命中（`amount_ratio` 為 NULL）。
+  - 折扣大於金額（`REVIEW_REASON_COUPON`）：`coupon_discount > amount_twd`，`net_amount_twd` 為負（使用者定 B：「太大的可能是全額折抵」，所以不隔離）。coupon 為 NULL 時不算命中。〔防護性設計：本資料 0 筆〕
 - 寫入：和隔離表一樣依 batch_id replaceWhere。本資料 base 40 列、增量 0 列。
 - 清單只標記、不改 fact：人工確認之前，這些列的金額仍會算進營收。
 
@@ -317,16 +348,16 @@ for day in [date(2026, 4, 30), date(2026, 5, 31), date(2026, 6, 30)]:
 - `input_rows`＝`fact_rows`＋`quarantined_rows`＋`skipped_rows`（`balanced`）。`quarantined_by_category` 不含略過的類別。
 - `skipped_intermediate_rows`：寫進 fact 的列中，跳過中間狀態的筆數（只算寫進 fact 的列；狀態機的 `state_skipped` 也只會標在 accepted 的列）。
 - `coupon_nulled_rows`：寫進 fact 的列中，coupon -1.0 轉成 NULL 的筆數。
-- `amount_review_rows`：這批列進 V2 人工確認清單的筆數。
+- `amount_review_rows`：這批列進金額人工確認清單（`amount_review`）的筆數（每張單算一次）。
 - `amount_twd_sum`、`net_amount_twd_sum`、`unknown_product_rows`、`unknown_member_rows`：這批寫進 fact 的列（net 總和不計 NULL）。
 - `fact_table_rows`、`fact_table_amount_twd_sum`、`fact_table_net_amount_twd_sum`：寫入後整張 fact。
 - `member_rejected_rows`：dim_member 的違規列數（會員快照，不在訂單對帳內）。
 - 筆數都用 `count()` 計算，只在 `build_spark()` 的設定下才準（見 session.py 一節）。
 
-### run.py
+### 3.13 run.py
 `python -m pipeline.run [--data-dir 目錄] [--out 目錄] [--force]`：依序跑 base → day3，每批印出對帳。參數沒給時讀環境變數 `LIONTEST_DATA_DIR`、`LIONTEST_OUT`。Docker 的 CMD 就是這條指令（見 `part_a/README.md`「怎麼跑」）。
 
-## 測試
+## 4. 測試
 ```bash
 uv run pytest LionDEExam/submission/part_a/tests -q -m "not slow"   # 開發中：只跑快的
 uv run pytest LionDEExam/submission/part_a/tests -q                  # 交付前：全套

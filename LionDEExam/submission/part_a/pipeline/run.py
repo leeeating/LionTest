@@ -39,7 +39,7 @@ def format_run(run: BatchRun) -> str:
             ),
             (
                 f"  coupon -1.0 轉 NULL {c.coupon_nulled_rows:,}；"
-                f"V2 人工確認清單 {c.amount_review_rows:,}"
+                f"金額人工確認清單 {c.amount_review_rows:,}"
             ),
             (
                 f"  本批 amount_twd 總和 {c.amount_twd_sum:,}；"

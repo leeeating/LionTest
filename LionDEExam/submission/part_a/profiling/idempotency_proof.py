@@ -12,7 +12,7 @@
 
 比對的內容（不看 Delta operationMetrics：MERGE 重寫同值也會算 updated）：
 fact 筆數、amount_twd 與 net_amount_twd 總和、以下各表的整表內容 hash：fact、隔離表、
-V2 人工確認清單（amount_review）、dim_member、dim_product、dim_date；
+金額人工確認清單（amount_review）、dim_member、dim_product、dim_date；
 以及該批的對帳數字（BatchCounts，不含完成時間與寫入當下的整表數字 fact_table_*）。
 """
 
@@ -64,7 +64,7 @@ class Snapshot:
 
 HEADER = (
     "| 時點 | fact 筆數 | amount_twd 總和 | net_amount_twd 總和 | fact hash | 隔離表筆數 "
-    "| 隔離表 hash | V2 清單 hash | 維度表 hash（member/product/date） | {last} |"
+    "| 隔離表 hash | 金額人工確認清單 hash | 維度表 hash（member/product/date） | {last} |"
 )
 RULE = "|---|---|---|---|---|---|---|---|---|---|"
 
@@ -187,6 +187,8 @@ def main() -> int:
                 batch_id="day3",
                 as_of=INCREMENTAL_AS_OF[3],
                 source_checksum=source.orders_checksum(3),
+                reference_checksums=source.reference_checksums(),
+                force_log_path=b.batch_force_log,
                 run=run,
             )
         except SimulatedCrash:

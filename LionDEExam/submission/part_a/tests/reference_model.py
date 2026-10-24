@@ -3,10 +3,11 @@
 不 import pipeline 的任何東西，所以和被測的 Spark 實作互相獨立；
 test_fact_order.py（base）與 test_fact_order_incremental.py（base → day3）共用。
 
-依序：合約（金額必須大於 0，V1）→ coupon -1.0 轉 NULL（V3）→ 同批撞號（ADR-03）
+依序：合約（金額必須大於 0，V1；coupon 不可為 -1 以外的負數）→ coupon -1.0 轉 NULL（V3）
+→ 同批撞號（ADR-03）
 → 完全重複（只算時間上相鄰的相同列）→ 與既有 fact 撞號 → 狀態機（晚到用可達性、
 逐段用可達性、同一秒不同狀態、不合法之後一起隔離）→ 匯率 → -1、net_amount_twd、
-V2 清單（比值 > 100）。
+金額人工確認清單（比值 > 100，或 coupon > amount_twd；同一列只算一次）。
 """
 
 from __future__ import annotations
@@ -148,7 +149,9 @@ def reference():
         cats = collections.Counter()
         valid = []
         for r in rows:
-            if Decimal(r["amount"]) <= 0:
+            c = r["coupon_discount"]
+            bad_coupon = c not in ("", None) and Decimal(c) < 0 and Decimal(c) != -1
+            if Decimal(r["amount"]) <= 0 or bad_coupon:
                 cats["contract"] += 1
                 continue
             valid.append(r)
@@ -207,10 +210,12 @@ def reference():
             n["unknown_m"] += reg is None or day < reg
             n["skip"] += skip
             n["coupon"] += nulled
+            review = net is not None and net < 0
             if p is not None and p["base_price_twd"]:
                 denom = Decimal(p["base_price_twd"]) * int(r["quantity"])
                 if denom > 0 and (twd / denom).quantize(CENT) > REVIEW_RATIO:
-                    n["review"] += 1
+                    review = True
+            n["review"] += review
         skipped = cats.pop("late_event", 0)
         result[batch] = {
             "input_rows": len(rows),

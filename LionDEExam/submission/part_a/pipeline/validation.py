@@ -11,6 +11,8 @@ try_cast('2026-06-25T14:02:16+08:00' AS DATE) 得到 2026-06-25。這些都會�
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import (
@@ -24,7 +26,12 @@ from pyspark.sql.types import (
     StructType,
 )
 
-from pipeline.contracts import ALLOWED_VALUES_KEY, POSITIVE_KEY, SOURCE_ERROR_COL
+from pipeline.contracts import (
+    ALLOWED_VALUES_KEY,
+    NON_NEGATIVE_EXCEPT_KEY,
+    POSITIVE_KEY,
+    SOURCE_ERROR_COL,
+)
 from pipeline.timeparse import (
     FORMAT_METADATA_KEY,
     SOURCE_TIMESTAMP,
@@ -63,6 +70,23 @@ def _reason(cond: Column, text: str) -> Column:
 def _is_blank(raw: Column) -> Column:
     """NULL、空字串、或只有空白字元。"""
     return raw.isNull() | raw.rlike(r"^\s*\z")
+
+
+def _non_negative_reason(
+    field: StructField, checkable: Column, casted: Column
+) -> Column:
+    """數值小於 0、且不是 NON_NEGATIVE_EXCEPT_KEY 列出的特殊值時，回傳原因字串。
+
+    特殊值以 Decimal 比較，所以 "-1"、"-1.0"、"-1.00" 都算同一個值。
+    """
+    exceptions = field.metadata[NON_NEGATIVE_EXCEPT_KEY]
+    allowed = (
+        casted.isin(*[Decimal(v) for v in exceptions]) if exceptions else F.lit(False)
+    )
+    return _reason(
+        checkable & (casted < 0) & ~allowed,
+        f"{field.name}:必須大於或等於 0（{'、'.join(exceptions)} 除外）",
+    )
 
 
 def _format_reasons(raw: Column, field: StructField) -> list[Column]:
@@ -122,6 +146,11 @@ def _format_reasons(raw: Column, field: StructField) -> list[Column]:
                 if field.metadata.get(POSITIVE_KEY)
                 else []
             ),
+            *(
+                [_non_negative_reason(field, present & well_formed, casted)]
+                if field.metadata.get(NON_NEGATIVE_EXCEPT_KEY) is not None
+                else []
+            ),
         ]
     if isinstance(dtype, DateType):
         # 格式不對，或格式對但日期不存在（例如 2026-02-30）時為 NULL
@@ -148,9 +177,17 @@ def cast_to_contract(
     - 違規種類：欄位數不符、必填空值（含只有空白）、型別不符、小數位超過 scale、
       整數位超過、時間字串無法解析（合約 metadata 標記 source_timestamp 的欄位）、
       值不在允許範圍（合約 metadata 標記 allowed_values 的欄位）、
-      數值不大於 0（合約 metadata 標記 positive 的欄位）。
+      數值不大於 0（合約 metadata 標記 positive 的欄位）、
+      數值小於 0 且不是特殊值（合約 metadata 標記 non_negative_except 的欄位）。
     - 兩者用同一個條件（reject_reasons 是否為空）切開，互斥且涵蓋所有列，
       所以 valid 筆數＋rejected 筆數＝輸入筆數。
+    - 每列的違規原因只算一次：算好 reject_reasons 的結果先 localCheckpoint（lazy，
+      第一個用到它的 action 才計算並存起來），valid 與 rejected 都從存好的結果切開，
+      不各自重跑一次所有 regex／try_cast 檢查。函式本身不呼叫 action、不計算檢查結果；
+      但建立 checkpoint 時要先產生輸入的 RDD，輸入的查詢含 shuffle（例如 join、groupBy）
+      時，AQE 會在這時先執行 shuffle 階段的 job。管線傳進來的是剛讀的 CSV，沒有 shuffle。
+      存起來的資料沒有對外的釋放介面：valid、rejected（以及由它們衍生的 DataFrame）
+      不再被引用後，由 Spark 的 ContextCleaner 回收，和本專案其他 localCheckpoint 相同。
     """
     missing = [f.name for f in schema.fields if f.name not in df.columns]
     if missing:
@@ -168,10 +205,12 @@ def cast_to_contract(
             reasons.append(_reason(_is_blank(raw), f"{field.name}:必填空值"))
         reasons.extend(_format_reasons(raw, field))
 
+    # 只算一次再拆開：不 checkpoint 時 valid、rejected 各自是一條獨立的查詢，
+    # 每個 action 都從輸入重跑全部檢查（實測比直接讀慢 9～49 倍）
     checked = df.withColumn(
         REJECT_REASONS_COL,
         F.filter(F.array(*reasons), lambda r: r.isNotNull()),
-    )
+    ).localCheckpoint(eager=False)
     is_valid = F.size(REJECT_REASONS_COL) == 0
 
     valid = checked.filter(is_valid).select(

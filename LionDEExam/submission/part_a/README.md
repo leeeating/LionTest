@@ -4,7 +4,33 @@
 
 > 施工中：模型說明（`model.md`）與資料品質報告（`data-quality-report.md`）的數字仍以 base 為準，T7 更新。
 
-## 進度
+## 目錄
+
+- [1. 進度](#1-進度)
+- [2. 怎麼跑](#2-怎麼跑)
+  - [2.1 本機](#21-本機)
+  - [2.2 Docker](#22-docker)
+- [3. 檔案結構](#3-檔案結構)
+- [4. 設計重點](#4-設計重點)
+  - [4.1 來源讀取：介面＋schema 合約](#41-來源讀取介面schema-合約)
+  - [4.2 時區](#42-時區)
+  - [4.3 dim_product](#43-dim_product)
+  - [4.4 dim_date](#44-dim_date)
+  - [4.5 dim_member](#45-dim_member)
+  - [4.6 fact_order、隔離表、對帳](#46-fact_order隔離表對帳)
+- [5. 星型模型](#5-星型模型)
+- [6. 增量處理策略](#6-增量處理策略)
+  - [6.1 執行方式](#61-執行方式)
+  - [6.2 每種狀況的處理](#62-每種狀況的處理)
+  - [6.3 三天實跑的對帳](#63-三天實跑的對帳)
+  - [6.4 中途當掉與重跑](#64-中途當掉與重跑)
+  - [6.5 隔離後的人工處理](#65-隔離後的人工處理)
+- [7. 冪等證明](#7-冪等證明)
+- [8. 資料品質報告](#8-資料品質報告)
+- [9. 已知限制](#9-已知限制)
+- [10. 相關決策](#10-相關決策)
+
+## 1. 進度
 | 項目 | 狀態 |
 |---|---|
 | 環境（Docker） | 完成 |
@@ -14,9 +40,9 @@
 | 增量處理與冪等證明（T6） | 完成（待獨立驗收） |
 | 文件（T7） | 本檔撰寫中 |
 
-## 怎麼跑
+## 2. 怎麼跑
 
-### 本機
+### 2.1 本機
 需要 Java 17 與 [uv](https://docs.astral.sh/uv/)。在 repo 根目錄：
 
 ```bash
@@ -38,7 +64,7 @@ uv run pytest LionDEExam/submission/part_a/tests -q                  # 全套
 uv run python LionDEExam/submission/part_a/profiling/idempotency_proof.py
 ```
 
-### Docker
+### 2.2 Docker
 ```bash
 docker build -t liontest-parta .
 docker run --rm --network none --hostname localhost liontest-parta
@@ -50,7 +76,7 @@ docker run --rm --network none --hostname localhost \
   -v "$PWD/out:/out" -e LIONTEST_OUT=/out liontest-parta
 ```
 
-## 目錄
+## 3. 檔案結構
 ```
 part_a/
 ├── pipeline/          管線程式
@@ -72,9 +98,9 @@ part_a/
 └── profiling/         來源資料剖析腳本、品質查詢、冪等證明腳本
 ```
 
-## 設計重點
+## 4. 設計重點
 
-### 來源讀取：介面＋schema 合約
+### 4.1 來源讀取：介面＋schema 合約
 來源抽成介面 `SourceReader`，目前只實作 `CsvSource`；源頭日後換成 SQL DB，只需要換這一層（ADR-02）。
 
 - 每個來源的欄名、型別、是否必填都寫成常數（合約），不用 Spark 自動推斷型別。
@@ -85,9 +111,10 @@ part_a/
 - 判斷違規只看原始字串，不靠 Spark 的轉型結果：Spark 會把 `100.456` 四捨五入成 `100.46`、把 `1e2` 轉成 `100.00`，都不報錯。科學記號算違規，因為上游 DB 匯出的金額應是一般十進位寫法，出現科學記號代表中間經過浮點數轉換。
 - **允許值**：`order_status` 只能是 4 種狀態（清單和狀態機共用同一份），`currency` 只能是 TWD、NTD、USD、JPY（實查四個訂單檔得到；NTD 是 TWD 的別名，保留並以匯率 1 換算）。大小寫、空白不同都算違規。〔防護性設計：本資料 0 筆〕
 - **金額必須大於 0**（V1，使用者定：「負數在合約層就該擋下」）：base 有 50 列負數金額，以「amount:必須大於 0」隔離，不進 fact。
+- **coupon 不可為 -1 以外的負數**（使用者定 B：「負數 coupon 沒有合理解釋」）：以「coupon_discount:必須大於或等於 0（-1.00 除外）」隔離；-1 代表未知，照 V3 轉 NULL。〔防護性設計：本資料 0 筆〕
 - 目前資料以這份合約檢查，只有上述 50 列被分到 rejected；其他已知的品質問題（NTD、N/A、coupon -1.0 等）在合約之外，由後面的步驟處理。
 
-### 時區
+### 4.2 時區
 SparkSession 固定 `spark.sql.session.timeZone=Asia/Taipei`。下單時間有三種格式，解析規則如下（`parse_source_timestamp()`）：
 
 | 格式 | 解讀 |
@@ -98,16 +125,16 @@ SparkSession 固定 `spark.sql.session.timeZone=Asia/Taipei`。下單時間有�
 
 推論的證據見 `notes/part_a/schema-inference/order-time.md`。
 
-### dim_product
+### 4.3 dim_product
 - Type 1：主檔只有一份，不保留歷史。
 - 代理鍵 `product_sk` 用 product_id 的 hash 計算，重跑結果不變。
 - 主檔的 product_id 重複時整批停下報錯，不任選一列。
 - 另外加一列「未知產品」（`product_sk = -1`），訂單的 product_id 在主檔中找不到時對應到這列。
 
-### dim_date
+### 4.4 dim_date
 `date_sk` 用 yyyymmdd 格式的整數。日期範圍不寫死，從呼叫端傳入的訂單算出，涵蓋其中所有下單日和出發日（base＋三天增量全部處理完是 2026-05-01～2026-10-30）。逐日處理時，每一批只補上新出現的日期，既有日期不變。
 
-### dim_member
+### 4.5 dim_member
 會員資料是三批快照（04-30 全量、05-31、06-30），後兩批放的是會員當時的完整樣子，不一定有變動。
 
 - **SCD Type 2**：等級、縣市改變就開新版本；姓名、生日是更正，直接覆寫所有版本。
@@ -117,7 +144,7 @@ SparkSession 固定 `spark.sql.session.timeZone=Asia/Taipei`。下單時間有�
 - **代理鍵用 hash(member_id, valid_from)**，重跑穩定；fact 依台北下單日對到當時有效的版本，對不到的落到「未知會員」（-1）。未知會員列的 `valid_from` 是 1900-01-01、`register_date` 是 NULL，fact 對不到任何版本時直接給 -1，不靠這列的區間。
 - 三批處理完是 8,000 位會員、8,772 個版本（772 人有 2 個版本），另加 1 列未知會員。
 
-### fact_order、隔離表、對帳
+### 4.6 fact_order、隔離表、對帳
 - **一批一次呼叫**：`load_order_batch()` 依序更新維度、寫 fact_order 與隔離表、回傳對帳結果。base 是第一批（`load_base()`），每日增量用同一個函式逐日呼叫（`load_incremental()`），`run_all()` 用批次紀錄依序跑完。轉換步驟集中在 `transform_order_batch()`，不寫 Delta，測試直接驗它。
 - **一張訂單一列、存最新狀態**，以 order_id MERGE（ADR-04）。
 - **重複列（V7）**：同一 order_id 依 updated_at 排序，**時間上相鄰**而且除了 updated_at 以外全同的列才算重複，保留 updated_at 最新的一列，其餘以 `duplicate` 進隔離表。中間夾著其他內容的相同列不算重複（使用者定：「中間如果有出現其他狀態 不能當作延遲」），和內容不同的同 order_id 列一起交給狀態機（見「增量處理策略」）。下單時間比較換算後的時刻，所以格式不同（`Z`、`+08:00`、無時區）但同一時刻的 8 組仍算重複。
@@ -126,12 +153,14 @@ SparkSession 固定 `spark.sql.session.timeZone=Asia/Taipei`。下單時間有�
 - **參考資料有問題就整批停**：產品清單有違規列或 product_id 重複、匯率表有違規列或同日同幣別重複時，在寫任何表之前報錯（一律是 `ReferenceDataError`）。
 - **對不到維度落 -1**：product_id 不在清單、會員對不到版本時 sk＝-1，對帳另列筆數。
 - **隔離表**：一張 Delta 表，每列有 batch_id、上游送來的原始字串、隔離類別與原因；以 replaceWhere 清掉同一批再寫，重跑不會變兩份。略過的晚到事件（`late_event`）也留在這裡，對帳時和隔離分開算。
-- **對帳**：每批證明「輸入＝寫進 fact＋隔離＋略過」，另附 amount_twd 與 net_amount_twd 總和（checksum）、落到 -1 的筆數、跳過中間狀態的筆數、coupon 轉 NULL 的筆數、V2 清單筆數；不平就在寫入前報錯。
+- **對帳**：每批證明「輸入＝寫進 fact＋隔離＋略過」，另附 amount_twd 與 net_amount_twd 總和（checksum）、落到 -1 的筆數、跳過中間狀態的筆數、coupon 轉 NULL 的筆數、金額人工確認清單筆數；不平就在寫入前報錯。
 - **截止日**：會員快照截止在 06-30；base 訂單的下單日都在 06-30 以前，但狀態最晚更新到 07-03（2,265 列的 updated_at 落在 07-01～07-03）。會員依下單日對版本，所以 base 的 as_of 用 06-30。dim_date 只依這批訂單擴充，base 跑完是 05-01～10-27。
 - **A-3 品質問題的處理**（使用者定案，見 process-log）：
   - V1 負數金額：合約擋下，進隔離表（`contract`）。
   - V3 coupon -1.0：代表「未知」，轉成 NULL，訂單照常寫入；轉了幾筆記在對帳（`coupon_nulled_rows`）。
   - V2 疑似多乘 1,000：照原樣寫入 fact，另外列進人工確認清單 `amount_review`（Delta 表，依 batch_id replaceWhere）。判斷用比值 `amount_twd ÷（產品定價 × 數量）`：正常列落在 0.84～1.29，比值大於 100 的列入清單。**人工確認前，這些列會讓營收多算**（base 約 28%，見資料品質報告）。產品落到 -1 時沒有定價，算不出比值，不列入。
+  - coupon 大於 amount_twd（net_amount_twd 為負）：照原樣寫入 fact，同樣列進 `amount_review`（使用者定 B：「太大的可能是全額折抵」）。清單每張單一列，`review_reasons` 記命中的原因，兩種都中時兩個都列。〔防護性設計：本資料 0 筆〕
+  - coupon 為 -1 以外的負數：合約擋下，進隔離表（`contract`）。〔防護性設計：本資料 0 筆〕
   - completed 但出發日未到等：只記錄，照原樣寫入。
   - 品質規則的掛載點 `ORDER_QUALITY_RULES` 保留，目前沒有規則。
 
@@ -151,26 +180,29 @@ base 實跑結果（四批的完整對帳見「增量處理策略」）：
 | amount_twd 總和 | 35,969,473,520.09 |
 | net_amount_twd 總和（coupon 為 NULL 的列不計） | 35,783,693,189.25 |
 
-## 星型模型
+## 5. 星型模型
 見 [`model.md`](model.md)：模型圖、各表粒度與欄位、dim_member SCD2 規則、fact 怎麼接維度、金額換算、已知限制。數字是 base 載入後量的，三個增量檔處理完後會更新。
 
-## 增量處理策略
+## 6. 增量處理策略
 
-### 執行方式
+### 6.1 執行方式
 - **一個檔案＝一批**，依序處理 base → day1 → day2 → day3（`run_all()`、`python -m pipeline.run`）。每批的 `as_of` 依序是 06-30、07-01、07-02、07-03：會員快照只看到 as_of 為止，dim_date 只依當批訂單擴充，不偷看之後的檔案。
-- **批次紀錄**（`batch_log`）在每批**最後**寫一列，內容是對帳數字與來源檔 sha256：
+- **批次紀錄**（`batch_log`）在每批**最後**寫一列，內容是對帳數字、這批訂單檔的 sha256，以及參考資料（members、products、fx_rates）各自的 sha256：
   - 已完成的批次再跑：直接跳過，回傳既有紀錄。
   - 前一批沒完成：拒絕執行（`BatchOrderError`）。會員維度靠 `last_seen_extract_date` 擋重送，順序亂掉會遺失中間那段會員歷史（見「已知限制」）。
-  - 已完成的批次來源檔被改過（sha256 不同）：丟 `SourceChangedError`，不默默跳過。〔防護性設計：本資料 0 筆〕
+  - 已完成的批次訂單檔被改過（sha256 不同）：丟 `SourceChangedError`，不默默跳過。〔防護性設計：本資料 0 筆〕
+  - 已完成的批次參考資料和當時不同：只發警告（logging），照常跳過；參考資料是整份快照，之後的批次本來就會讀到新版本（使用者定 C）。〔防護性設計：本資料 0 筆〕
+  - `--force` 強制重跑覆寫既有紀錄時，呼叫處理之前先在強制重跑紀錄 `batch_log_force` 追加一列 `started`，完成後再追加 `completed`（表設 `delta.appendOnly`，只增不改）：哪一批、什麼時候、舊／新訂單檔與參考資料的 sha256。中途當掉時只有 `started`，fact 就算已被改寫也看得出這批被 force 過（使用者定 C：「要避免訂單狀態可以被隨意修改 如果要修改需要使用 force 來紀錄」）。
 - **新舊以 `updated_at` 判斷**（J6）：fact 的 MERGE 只在 `s.updated_at > t.updated_at` 時覆寫，亂序送來的舊事件不會讓狀態倒退。
 
-### 每種狀況的處理
+### 6.2 每種狀況的處理
 一張單在一批裡可能有多列。依序經過下面各關，每一列只會落在一個分類；「略過」的列也留在隔離表，但對帳時和「隔離」分開計數。
 
 | 狀況 | 處理 | 分類 | base | day1 | day2 | day3 |
 |---|---|---|---|---|---|---|
 | 金額不大於 0（V1） | 隔離 | `contract` | 50 | 0 | 0 | 0 |
 | 其他格式違規、狀態或幣別不在允許值 | 隔離〔防護性設計：本資料 0 筆〕 | `contract` | 0 | 0 | 0 | 0 |
+| coupon 為 -1 以外的負數 | 隔離〔防護性設計：本資料 0 筆〕 | `contract` | 0 | 0 | 0 | 0 |
 | 同批同 order_id，但會員、下單時間或金額不同（撞號，ADR-03） | 整組隔離 | `collision` | 0 | 6 | 2 | 4 |
 | 時間上相鄰、除 `updated_at` 外完全相同（V7、同狀態重送） | 保留最新一列，其餘隔離 | `duplicate` | 40 | 15 | 15 | 15 |
 | 相同的列中間夾著其他內容（例如 cancelled → paid → cancelled） | 不算重複，交給狀態機〔防護性設計：本資料 0 筆〕 | （依狀態機分類） | 0 | 0 | 0 | 0 |
@@ -186,13 +218,14 @@ base 實跑結果（四批的完整對帳見「增量處理策略」）：
 | A-3 品質規則 | 目前沒有規則 | `quality` | 0 | 0 | 0 | 0 |
 | coupon＝-1.0（V3，代表未知） | 轉 NULL，照常寫入，只計數 | （寫入，計數 `coupon_nulled_rows`） | 299 | 0 | 0 | 0 |
 | 金額比值 > 100（V2，疑似多乘 1,000） | 照常寫入，另列人工確認清單 `amount_review` | （寫入，計數 `amount_review_rows`） | 40 | 0 | 0 | 0 |
+| coupon > amount_twd（net 為負） | 照常寫入，另列人工確認清單 `amount_review`〔防護性設計：本資料 0 筆〕 | （寫入，計數 `amount_review_rows`） | 0 | 0 | 0 | 0 |
 
 狀態機的判斷全部用**可達性**（這個狀態能不能經過 0 步以上走到那個狀態），不用一步轉移表。原因是無法確定上游送的是事件還是快照，兩次快照之間的中間狀態可能沒拍到。合法的一步轉移只有 created→paid、created→cancelled、paid→cancelled、paid→completed（假設流程單向，見 `notes/part_a/order-state-machine.md`）。
 
-### 三天實跑的對帳
+### 6.3 三天實跑的對帳
 `python -m pipeline.run` 的輸出（2026-10-19）：
 
-| 批次 | 輸入 | 寫進 fact | 隔離 | 略過 | 跳過中間狀態 | coupon 轉 NULL | V2 清單 | product -1 | member -1 | 本批 amount_twd | 本批 net_amount_twd |
+| 批次 | 輸入 | 寫進 fact | 隔離 | 略過 | 跳過中間狀態 | coupon 轉 NULL | 金額人工確認清單 | product -1 | member -1 | 本批 amount_twd | 本批 net_amount_twd |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | base | 100,040 | 99,950 | 90 | 0 | 0 | 299 | 40 | 120 | 0 | 35,969,473,520.09 | 35,783,693,189.25 |
 | day1 | 4,615 | 4,000 | 615 | 0 | 0 | 0 | 0 | 0 | 0 | 1,056,883,370.88 | 1,055,002,970.88 |
@@ -214,21 +247,21 @@ base 實跑結果（四批的完整對帳見「增量處理策略」）：
 - net_amount_twd 總和比 amount_twd 少的部分是 coupon 折扣；coupon 為 NULL（原本是 -1.0）的列 net 也是 NULL，不計入總和。
 - 以上數字由 `tests/test_fact_order_incremental.py` 用純 Python 依同樣規則獨立計算（`tests/reference_model.py`）比對，結果一致。
 
-### 中途當掉與重跑
+### 6.4 中途當掉與重跑
 - 寫入順序：維度 → 隔離表（replaceWhere 同一批）→ fact（MERGE）→ 批次紀錄。任何一步當掉，批次紀錄都不會寫，下次重跑整批。
 - 重跑時，fact 可能已經寫入這批的結果。如果直接拿來比，這批每列都會變成晚到事件，分類和第一次不同。所以撞號和狀態機都和「這批開始之前」的 fact 比：每批第一次開始、還沒寫任何 fact 或隔離表之前，先把當時 fact 的 Delta 版本記在 `batch_start` 表；重跑（當掉後或 `--force`）時沿用記下的版本，用 time travel 讀出來。
 - 為什麼不從 Delta history 找這批的 commit：這批寫進 fact 的列是 0 時（例如整批都不合法），MERGE 不會產生 commit，history 裡就沒有這批的痕跡（T6 驗收找到的漏洞）。
 - 每次 MERGE fact 仍會在 commit 的 `userMetadata` 標上 `batch:<batch_id>`，只作為稽核，看得出哪一批寫了哪個版本。
 
-### 隔離後的人工處理
+### 6.5 隔離後的人工處理
 管線只負責第一步（列出問題），後面兩步是營運流程：
 
 1. **列出問題**：隔離表保留上游送來的原始字串、分類與原因；每批的對帳數字有各分類的筆數，也寫進批次紀錄。正式環境應在 `illegal_transition`、`ambiguous_order`、`late_event_conflict`、`collision*` 出現時告警。
 2. **查上游**：依 order_id 回上游系統確認實際狀態。
 3. **修正**：建議由上游重送一筆 `updated_at` 較新的正確事件，管線照常處理；上游無法重送時，另建人工修正表，由管線在處理增量時套用。人工修正表目前沒有實作。
 
-## 冪等證明
-「同一批跑兩次結果相同」不能只看 Delta history 的 operationMetrics：MERGE 重寫同樣的值也會算成 updated。所以直接比內容：fact 筆數、amount_twd 與 net_amount_twd 總和，以及 fact、隔離表、V2 人工確認清單、dim_member、dim_product、dim_date 六張表的整表內容 hash，再加上該批的對帳數字。整表 hash 的算法是每列轉成 JSON 取 sha256，排序後再整體取 sha256，與列順序、檔案切法無關。
+## 7. 冪等證明
+「同一批跑兩次結果相同」不能只看 Delta history 的 operationMetrics：MERGE 重寫同樣的值也會算成 updated。所以直接比內容：fact 筆數、amount_twd 與 net_amount_twd 總和，以及 fact、隔離表、金額人工確認清單（amount_review）、dim_member、dim_product、dim_date 六張表的整表內容 hash，再加上該批的對帳數字。整表 hash 的算法是每列轉成 JSON 取 sha256，排序後再整體取 sha256，與列順序、檔案切法無關。
 
 腳本：`profiling/idempotency_proof.py`。兩個實驗：
 
@@ -239,38 +272,39 @@ base 實跑結果（四批的完整對帳見「增量處理策略」）：
 
 **實驗 1：每個增量檔強制重跑一次（force=True，實際執行）**
 
-| 時點 | fact 筆數 | amount_twd 總和 | net_amount_twd 總和 | fact hash | 隔離表筆數 | 隔離表 hash | V2 清單 hash | 維度表 hash（member/product/date） | 該批對帳數字與第一次相同 |
+| 時點 | fact 筆數 | amount_twd 總和 | net_amount_twd 總和 | fact hash | 隔離表筆數 | 隔離表 hash | 金額人工確認清單 hash | 維度表 hash（member/product/date） | 該批對帳數字與第一次相同 |
 |---|---|---|---|---|---|---|---|---|---|
-| 第一次跑完 base→day3 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | 6611fe01d981 | e3b96f2c/461e56f0/5114d583 | — |
-| 重跑 day1 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | 6611fe01d981 | e3b96f2c/461e56f0/5114d583 | 是 |
-| 重跑 day2 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | 6611fe01d981 | e3b96f2c/461e56f0/5114d583 | 是 |
-| 重跑 day3 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | 6611fe01d981 | e3b96f2c/461e56f0/5114d583 | 是 |
+| 第一次跑完 base→day3 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | — |
+| 重跑 day1 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | 是 |
+| 重跑 day2 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | 是 |
+| 重跑 day3 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | 是 |
 
 **實驗 2：day3 在 MERGE 前當掉、重跑又在 MERGE 後當掉，第三次完成**
 
-| 時點 | fact 筆數 | amount_twd 總和 | net_amount_twd 總和 | fact hash | 隔離表筆數 | 隔離表 hash | V2 清單 hash | 維度表 hash（member/product/date） | day3 對帳數字與沒當掉時相同 |
+| 時點 | fact 筆數 | amount_twd 總和 | net_amount_twd 總和 | fact hash | 隔離表筆數 | 隔離表 hash | 金額人工確認清單 hash | 維度表 hash（member/product/date） | day3 對帳數字與沒當掉時相同 |
 |---|---|---|---|---|---|---|---|---|---|
-| 當掉前（base→day2 跑完） | 108,010 | 38065915115.08 | 37876347234.24 | a672a4260958 | 1,345 | 62e321926a03 | 6611fe01d981 | e3b96f2c/461e56f0/bc81004b | — |
-| 第一次：MERGE 前當掉（批次紀錄：無；fact 未變） | 108,010 | 38065915115.08 | 37876347234.24 | a672a4260958 | 1,960 | 507b615cb601 | 6611fe01d981 | e3b96f2c/461e56f0/5114d583 | — |
-| 第二次：MERGE 後當掉（批次紀錄：無） | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | 6611fe01d981 | e3b96f2c/461e56f0/5114d583 | — |
-| 第三次：重跑完成 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | 6611fe01d981 | e3b96f2c/461e56f0/5114d583 | 是 |
-| 對照：倉儲 A 沒當掉 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | 6611fe01d981 | e3b96f2c/461e56f0/5114d583 | — |
+| 當掉前（base→day2 跑完） | 108,010 | 38065915115.08 | 37876347234.24 | a672a4260958 | 1,345 | 62e321926a03 | bc8770de6dd1 | e3b96f2c/461e56f0/bc81004b | — |
+| 第一次：MERGE 前當掉（批次紀錄：無；fact 未變） | 108,010 | 38065915115.08 | 37876347234.24 | a672a4260958 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | — |
+| 第二次：MERGE 後當掉（批次紀錄：無） | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | — |
+| 第三次：重跑完成 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | 是 |
+| 對照：倉儲 A 沒當掉 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | — |
 
 結論：全部相同（hash 只顯示前 12 碼，維度表前 8 碼）
 
 平常的重跑則由批次紀錄直接跳過，不會重新執行（`tests/test_fact_order_incremental.py` 的 `test_incremental_run_all_again_skips_every_batch`）。
 
-## 資料品質報告
+## 8. 資料品質報告
 見 [`data-quality-report.md`](data-quality-report.md)（撰寫中）：每個問題的描述、影響筆數、偵測查詢與輸出、處理決策與理由。查詢腳本在 `profiling/data_quality_queries.py`。
 
-## 已知限制
+## 9. 已知限制
+- **schema 變動後需重建倉儲**：沒有做 schema 遷移。例如批次紀錄新增 `reference_sha256`、金額人工確認清單新增三欄之後，用舊版程式建好的倉儲不能直接接著跑（MERGE、replaceWhere 會因 schema 不符失敗），要刪掉輸出目錄重跑。
 - **會員快照必須依日期順序處理**：dim_member 用 `last_seen_extract_date` 擋掉重送的舊快照，判斷以會員為單位。如果 05-31 的快照比 06-30 晚送到，兩批都出現的會員，05-31 那一版會被跳過，中間那段歷史會遺失（例如 05-31 升金卡、06-30 降回一般，表裡看不到金卡那一版）。管線靠批次紀錄強制依序處理來避免：前一批沒完成就拒絕跑下一批（`BatchOrderError`）。本題資料沒有同時出現在 05-31 與 06-30 的會員，所以目前的結果不受影響。
 
 - **重跑依賴 Delta time travel，有保存期限**：當掉後重跑、`--force` 重跑都要讀「這批開始之前」的 fact 版本。對 fact 執行 VACUUM 後，舊版本的資料檔被刪掉，這時重跑會直接報錯（不會默默算錯）；超過 Delta log 的保存期限（`delta.logRetentionDuration`，預設 30 天）後，舊版本也讀不到。正式環境要讓重跑的時間窗短於保存期限，或在 VACUUM 前確認沒有待重跑的批次。
-- **`--force` 不比對來源 checksum**：一般重跑時，已完成的批次來源被改過會報錯；`--force` 則直接用目前的來源檔重跑並覆寫這批的結果，不檢查來源是否被改過。只在確定要重算時使用。
+- **`--force` 不比對來源 checksum**：一般重跑時，已完成的批次來源被改過會報錯；`--force` 則直接用目前的來源檔重跑並覆寫這批的結果，不檢查來源是否被改過。只在確定要重算時使用。覆寫會留在強制重跑紀錄 `batch_log_force`（舊／新 sha256；中途當掉也有 `started` 那一列），但被覆寫前的對帳數字不另存，要看舊數字得用 Delta time travel 讀 `batch_log` 的舊版本。
 - **讀取層比 Spark 直接轉型慢**：為了不讓髒值被悄悄改掉，所有欄位先讀成字串，再由 `cast_to_contract()` 逐列檢查。實測 200 萬列（8 核本機，量測時有其他程式同時執行）：直接轉型的讀法 `count()` 0.64 秒、讀全部欄位 3.55 秒；目前的讀法兩者都約 31 秒。時間花在 regex 檢查與轉型，而且合格、隔離兩邊各算一次。本題 10 萬列約多 2 秒，可以忽略；正式環境到數千萬列時會是瓶頸（線性外推，未實測）。可行的優化方向是檢查只算一次並 persist、合併 regex，目前沒做，效果也未驗證。
 
-## 相關決策
+## 10. 相關決策
 - `decisions/ADR-01`～`ADR-04`（皆已定案）：
   - ADR-01 執行引擎選 PySpark＋Delta
   - ADR-02 讀取來源抽成介面，品質規則寫成 schema 合約

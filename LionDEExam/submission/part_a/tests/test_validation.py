@@ -289,3 +289,34 @@ def test_order_status_allowed_values_share_state_machine_source():
 )
 def test_positive_amount_is_enforced(spark, override, expected):
     assert _reasons(spark, **override) == expected
+
+
+COUPON_NEGATIVE = "coupon_discount:必須大於或等於 0（-1.00 除外）"
+
+
+@pytest.mark.parametrize(
+    ("override", "expected"),
+    [
+        # 使用者定 B：-1 以外的負數 coupon 沒有合理解釋，在合約層擋下（防護性設計，本資料 0 筆）
+        ({"coupon_discount": "-5.00"}, [COUPON_NEGATIVE]),
+        ({"coupon_discount": "-0.01"}, [COUPON_NEGATIVE]),
+        ({"coupon_discount": "-2"}, [COUPON_NEGATIVE]),
+        # -1 代表未知（V3），不論寫法都放行，留給 fact_order 轉 NULL
+        ({"coupon_discount": "-1"}, []),
+        ({"coupon_discount": "-1.00"}, []),
+        ({"coupon_discount": "0"}, []),
+        ({"coupon_discount": "-0.00"}, []),
+        # 格式已經錯的值只記型別不符，不重複記「必須大於或等於 0」
+        (
+            {"coupon_discount": "-1e2"},
+            ["coupon_discount:型別不符（應為 decimal(18,2)）"],
+        ),
+        # 和其他違規一起出現時原因都列出，順序依合約欄序
+        (
+            {"amount": "-3.00", "coupon_discount": "-5.00"},
+            ["amount:必須大於 0", COUPON_NEGATIVE],
+        ),
+    ],
+)
+def test_negative_coupon_other_than_unknown_is_rejected(spark, override, expected):
+    assert _reasons(spark, **override) == expected

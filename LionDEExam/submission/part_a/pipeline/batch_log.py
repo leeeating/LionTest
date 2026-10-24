@@ -8,17 +8,25 @@
   （第一次開始時記在 batch_start，見 pin_fact_version），所以重跑結果相同。
 - 強制重跑（force=True）：已完成也照跑一次，覆寫完成紀錄；冪等證明用。
   force 不比對來源 checksum：來源被改過時，強制重跑會用新內容覆寫這批的結果。
+  呼叫 run 之前先在強制重跑紀錄（另一張只增不改的 Delta 表，見 record_forced）追加
+  started、完成後追加 completed，記下舊／新的訂單與參考資料 checksum；中途當掉也看得出
+  這批被 force 過、可能覆寫了什麼
+  （使用者定 C：「要避免訂單狀態可以被隨意修改 如果要修改需要使用 force 來紀錄」）。
 - 強制依序：前一批沒完成就拒絕跑下一批（BatchOrderError）。原因：dim_member 用
   last_seen_extract_date 擋重送，判斷以會員為單位；舊快照晚於新快照處理時，
   兩批都出現的會員，舊快照那一版會被跳過，中間那段歷史遺失。
-- 來源檔被改過：已完成的批次，checksum 和紀錄不同時丟 SourceChangedError，
+- 來源檔被改過：已完成的批次，訂單檔 checksum 和紀錄不同時丟 SourceChangedError，
   不默默跳過（跳過會讓倉儲和來源不一致，而且沒人知道）。
+- 參考資料（members、products、fx_rates）的 checksum 也記在紀錄裡；重跑時不同只發
+  警告（logging），照常跳過（使用者定 C）。參考資料是整份快照，每批都讀同一份檔，
+  之後的批次本來就會讀到新版本；只有訂單檔代表「這一批」本身。
 """
 
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable, Sequence
+import logging
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from decimal import Decimal
 from pathlib import Path
@@ -27,6 +35,7 @@ from delta.tables import DeltaTable
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import (
+    BooleanType,
     DateType,
     DecimalType,
     LongType,
@@ -40,6 +49,11 @@ from pyspark.sql.types import (
 # 批次的處理順序：base → day1 → day2 → day3
 BATCH_ORDER: tuple[str, ...] = ("base", "day1", "day2", "day3")
 
+logger = logging.getLogger(__name__)
+
+# 參考資料 checksum：key 是 sources.REFERENCE_FILES 的名稱（members、products、fx_rates）
+_CHECKSUM_MAP_TYPE = MapType(StringType(), StringType())
+
 _CHECKSUM_TYPE = DecimalType(38, 2)
 
 BATCH_LOG_SCHEMA = StructType(
@@ -48,6 +62,7 @@ BATCH_LOG_SCHEMA = StructType(
         StructField("as_of", DateType(), False),
         StructField("completed_at", TimestampType(), False),
         StructField("source_sha256", StringType(), False),
+        StructField("reference_sha256", _CHECKSUM_MAP_TYPE, False),
         StructField("input_rows", LongType(), False),
         StructField("fact_rows", LongType(), False),
         StructField("skipped_rows", LongType(), False),
@@ -75,7 +90,7 @@ class BatchOrderError(RuntimeError):
 
 
 class SourceChangedError(RuntimeError):
-    """已完成的批次，來源檔的 checksum 和紀錄不同：來源檔被改過。"""
+    """已完成的批次，訂單來源檔的 checksum 和紀錄不同：來源檔被改過。"""
 
 
 @dataclass(frozen=True)
@@ -133,6 +148,8 @@ class BatchRecord:
     completed_at: dt.datetime
     source_sha256: str
     counts: BatchCounts
+    # 參考資料各自的 checksum（members、products、fx_rates）；沒傳時是空的
+    reference_sha256: dict[str, str] = field(default_factory=dict, hash=False)
 
 
 @dataclass(frozen=True)
@@ -172,6 +189,7 @@ def completed_batch(
         as_of=r.as_of,
         completed_at=r.completed_at,
         source_sha256=r.source_sha256,
+        reference_sha256=dict(r.reference_sha256),
         counts=BatchCounts(
             **{
                 f.name: (
@@ -223,6 +241,7 @@ def record_completed(
         "as_of": record.as_of,
         "completed_at": record.completed_at,
         "source_sha256": record.source_sha256,
+        "reference_sha256": dict(record.reference_sha256),
         **{f.name: getattr(c, f.name) for f in fields(BatchCounts)},
     }
     values["quarantined_by_category"] = dict(c.quarantined_by_category)
@@ -242,6 +261,125 @@ def record_completed(
     merge.whenNotMatchedInsertAll().execute()
 
 
+# 強制重跑紀錄：只增不改（表屬性 delta.appendOnly）。每次 force 覆寫一筆既有完成紀錄時
+# 追加兩列：呼叫 run 之前先寫 started，寫完新的完成紀錄後再寫 completed（同一個 forced_at）。
+# run 中途當掉時只剩 started：fact 可能已被新內容改寫，但看得出這批被 force 過。
+FORCE_STARTED = "started"
+FORCE_COMPLETED = "completed"
+BATCH_FORCE_LOG_SCHEMA = StructType(
+    [
+        StructField("batch_id", StringType(), False),
+        # 這次 force 開始的時間；同一次 force 的 started、completed 兩列相同
+        StructField("forced_at", TimestampType(), False),
+        StructField("status", StringType(), False),
+        StructField("logged_at", TimestampType(), False),
+        # 被覆寫的那筆完成紀錄
+        StructField("previous_completed_at", TimestampType(), False),
+        StructField("previous_source_sha256", StringType(), False),
+        StructField("new_source_sha256", StringType(), False),
+        StructField("source_changed", BooleanType(), False),
+        StructField("previous_reference_sha256", _CHECKSUM_MAP_TYPE, False),
+        StructField("new_reference_sha256", _CHECKSUM_MAP_TYPE, False),
+    ]
+)
+
+
+def default_force_log_path(log_path: str | Path) -> Path:
+    """沒指定強制重跑紀錄的路徑時，放在批次紀錄旁邊：<log_path>_force。"""
+    p = Path(log_path)
+    return p.with_name(p.name + "_force")
+
+
+def record_forced(
+    spark: SparkSession,
+    force_log_path: str | Path,
+    previous: BatchRecord,
+    *,
+    status: str,
+    source_checksum: str,
+    reference_checksums: Mapping[str, str],
+    forced_at: dt.datetime,
+    logged_at: dt.datetime,
+) -> None:
+    """強制重跑紀錄追加一列：哪一批、哪一次 force（forced_at）、進行到哪（status）、
+    覆寫前後的 checksum。
+
+    只用 append；表第一次建立時設 delta.appendOnly=true，UPDATE、DELETE 會被 Delta 拒絕。
+    """
+    if status not in (FORCE_STARTED, FORCE_COMPLETED):
+        raise ValueError(f"未知的 status：{status!r}")
+    force_log_path = str(force_log_path)
+    if not DeltaTable.isDeltaTable(spark, force_log_path):
+        (
+            DeltaTable.createIfNotExists(spark)
+            .location(force_log_path)
+            .addColumns(BATCH_FORCE_LOG_SCHEMA)
+            .property("delta.appendOnly", "true")
+            .execute()
+        )
+    row = (
+        previous.batch_id,
+        forced_at,
+        status,
+        logged_at,
+        previous.completed_at,
+        previous.source_sha256,
+        source_checksum,
+        previous.source_sha256 != source_checksum,
+        dict(previous.reference_sha256),
+        dict(reference_checksums),
+    )
+    spark.createDataFrame([row], BATCH_FORCE_LOG_SCHEMA).write.format("delta").mode(
+        "append"
+    ).save(force_log_path)
+
+
+def forced_runs(
+    spark: SparkSession, force_log_path: str | Path, batch_id: str
+) -> list[dict]:
+    """這批的強制重跑紀錄（依 forced_at、logged_at 排序）；沒有紀錄時回傳空 list。"""
+    force_log_path = str(force_log_path)
+    if not DeltaTable.isDeltaTable(spark, force_log_path):
+        return []
+    rows = (
+        spark.read.format("delta")
+        .load(force_log_path)
+        .filter(F.col("batch_id") == batch_id)
+        # 同一次 force 的 started 一定排在 completed 前面（時間相同時也是）
+        .orderBy(
+            "forced_at",
+            "logged_at",
+            (F.col("status") != F.lit(FORCE_STARTED)).cast("int"),
+        )
+        .collect()
+    )
+    return [r.asDict(recursive=True) for r in rows]
+
+
+def _warn_reference_changed(
+    done: BatchRecord, reference_checksums: Mapping[str, str]
+) -> list[str]:
+    """參考資料和紀錄不同時發警告（不擋），回傳變動的名稱。"""
+    changed = sorted(
+        name
+        for name in set(done.reference_sha256) | set(reference_checksums)
+        if done.reference_sha256.get(name) != reference_checksums.get(name)
+    )
+    if changed:
+        detail = "、".join(
+            f"{n}（{done.reference_sha256.get(n)} → {reference_checksums.get(n)}）"
+            for n in changed
+        )
+        logger.warning(
+            "批次 %r 已在 %s 完成，但參考資料和當時不同：%s。照常跳過；"
+            "要用新的參考資料重算這批，請用 force 重跑（會留下強制重跑紀錄）",
+            done.batch_id,
+            done.completed_at,
+            detail,
+        )
+    return changed
+
+
 def run_once(
     spark: SparkSession,
     log_path: str | Path,
@@ -250,19 +388,25 @@ def run_once(
     as_of: dt.date,
     source_checksum: str,
     run: Callable[[], BatchCounts],
+    reference_checksums: Mapping[str, str] | None = None,
+    force_log_path: str | Path | None = None,
     order: Sequence[str] = BATCH_ORDER,
     force: bool = False,
     now: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.UTC),
 ) -> BatchRun:
     """一批最多處理一次。
 
-    1. 已完成：checksum 相同 → 跳過，回傳既有紀錄；不同 → SourceChangedError。
-       force=True 時不跳過也不比對 checksum，照常執行並覆寫紀錄（冪等證明用）。
+    1. 已完成：訂單檔 checksum 不同 → SourceChangedError；相同 → 跳過，回傳既有紀錄。
+       參考資料 checksum（reference_checksums）不同只發警告，照常跳過。
+       force=True 時不跳過也不比對 checksum，照常執行並覆寫紀錄（冪等證明用）；
+       覆寫既有紀錄時，呼叫 run 之前先在 force_log_path（預設 default_force_log_path）
+       追加 started，寫完新的完成紀錄後追加 completed。
     2. 前一批沒完成 → BatchOrderError（在呼叫 run 之前，什麼都還沒寫）。
     3. 呼叫 run()（寫維度、fact、隔離表，回傳對帳數字），最後寫完成紀錄。
-       run 中途丟例外時不寫紀錄，下次重跑整批。
+       run 中途丟例外時不寫完成紀錄，下次重跑整批；force 的 started 已經寫下，留著。
     """
     _check_batch_id(batch_id, order)
+    reference = dict(reference_checksums or {})
     done = completed_batch(spark, log_path, batch_id)
     if done is not None and not force:
         if done.source_sha256 != source_checksum:
@@ -270,8 +414,21 @@ def run_once(
                 f"批次 {batch_id!r} 已在 {done.completed_at} 完成，但來源檔 checksum "
                 f"從 {done.source_sha256} 變成 {source_checksum}：來源檔被改過，拒絕跳過"
             )
+        _warn_reference_changed(done, reference)
         return BatchRun(record=done, skipped=True)
     require_previous_completed(spark, log_path, batch_id, order)
+    forced = None
+    if done is not None:  # force 覆寫既有紀錄：在寫任何東西之前先留下 started
+        forced = {
+            "force_log_path": force_log_path or default_force_log_path(log_path),
+            "previous": done,
+            "source_checksum": source_checksum,
+            "reference_checksums": reference,
+            "forced_at": now(),
+        }
+        record_forced(
+            spark, **forced, status=FORCE_STARTED, logged_at=forced["forced_at"]
+        )
     counts = run()
     record = BatchRecord(
         batch_id=batch_id,
@@ -279,8 +436,13 @@ def run_once(
         completed_at=now(),
         source_sha256=source_checksum,
         counts=counts.counts(),
+        reference_sha256=reference,
     )
     record_completed(spark, log_path, record, replace=force)
+    if forced is not None:
+        record_forced(
+            spark, **forced, status=FORCE_COMPLETED, logged_at=record.completed_at
+        )
     return BatchRun(record=completed_batch(spark, log_path, batch_id), skipped=False)
 
 

@@ -802,6 +802,63 @@ def test_fact_order_amount_review_lists_ratio_over_100(spark, mini_src):
     assert t.fact.count() == 4
 
 
+def test_fact_order_amount_review_lists_coupon_over_amount(spark, mini_src):
+    # 使用者定 B：coupon > amount_twd（net 為負）照常寫入 fact，另列進 amount_review。
+    # 〔防護性設計：本資料 0 筆〕P00001 定價 50,000、數量 1
+    rows = [
+        _with_coupon(_order("O1", amount="1000.0"), "1000.0"),  # 相等：net 0，不列
+        _with_coupon(_order("O2", amount="1000.0"), "1500.0"),  # net -500 → 清單
+        # USD 10 × 30.5 ＝ 305.00 < coupon 400（台幣）→ net -95 → 清單
+        _with_coupon(_order("O3", currency="USD", amount="10.0"), "400.0"),
+        _with_coupon(_order("O4", amount="1000.0"), "-1.0"),  # coupon 未知（NULL）
+        # 兩種原因都中：比值 1,000 且 coupon 更大 → 一列，原因依序都列出
+        _with_coupon(_order("O5", amount="50000000.0"), "60000000.0"),
+    ]
+    t = _transform(spark, mini_src, rows)
+    got = {
+        r.order_id: (r.coupon_discount, r.net_amount_twd, r.review_reasons)
+        for r in t.amount_review.collect()
+    }
+    assert got == {
+        "O2": (
+            Decimal("1500.00"),
+            Decimal("-500.00"),
+            [fact_order.REVIEW_REASON_COUPON],
+        ),
+        "O3": (Decimal("400.00"), Decimal("-95.00"), [fact_order.REVIEW_REASON_COUPON]),
+        "O5": (
+            Decimal("60000000.00"),
+            Decimal("-10000000.00"),
+            [fact_order.REVIEW_REASON_RATIO, fact_order.REVIEW_REASON_COUPON],
+        ),
+    }
+    # fact 照原樣寫入（net 為負也寫），沒有任何列被隔離
+    assert t.fact.count() == 5
+    assert t.quarantine.count() == 0
+
+
+def test_fact_order_negative_coupon_is_quarantined_by_contract(spark, mini_src):
+    # 使用者定 B：-1 以外的負數 coupon 在合約層隔離，原始字串保留（防護性設計，本資料 0 筆）
+    rows = [
+        _with_coupon(_order("O1"), "-5.0"),
+        _with_coupon(_order("O2"), "-1.0"),
+    ]
+    t = _transform(spark, mini_src, rows)
+    q = [
+        (r.order_id, r.coupon_discount, r.reject_category, r.reject_reasons)
+        for r in t.quarantine.collect()
+    ]
+    assert q == [
+        (
+            "O1",
+            "-5.0",
+            Category.CONTRACT,
+            ["coupon_discount:必須大於或等於 0（-1.00 除外）"],
+        )
+    ]
+    assert [r.order_id for r in t.fact.collect()] == ["O2"]
+
+
 @pytest.mark.parametrize(
     ("dataset", "match", "cause"),
     [
@@ -903,6 +960,25 @@ def test_fact_order_rerun_same_batch_replaces_quarantine(spark, mini):
         ("t1", "O1"),
         ("t2", "O9"),
     ]
+
+
+@pytest.mark.slow
+def test_merge_upsert_clears_commit_marker_after_failure(spark, tmp_path):
+    # MERGE 丟例外時，userMetadata 也要清掉，否則之後別的 commit 會被標成這一批
+    path = tmp_path / "t"
+    schema = "order_id string, v int"
+    spark.createDataFrame([("O1", 1)], schema).write.format("delta").save(str(path))
+    # 這版 Delta 的錯誤訊息找不到 error class 模板，只看得到類別名稱
+    with pytest.raises(Exception, match="DELTA_MERGE_UNRESOLVED|no_such_key"):
+        merge_upsert(
+            spark,
+            spark.createDataFrame([("O1", 2)], schema),
+            path,
+            keys=["no_such_key"],
+            commit_marker="batch:boom",
+        )
+    conf = "spark.databricks.delta.commitInfo.userMetadata"
+    assert spark.conf.get(conf, None) is None
 
 
 @pytest.mark.slow
