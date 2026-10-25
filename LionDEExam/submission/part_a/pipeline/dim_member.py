@@ -42,10 +42,10 @@ BIRTH_PLACEHOLDER = dt.date(1900, 1, 1)
 # fact 對版本時可以統一寫成 valid_from <= d < valid_to，不必特判 NULL。
 CURRENT_VALID_TO = dt.date(9999, 12, 31)
 
-# 未知會員：fact 的 member_id 對不到任何版本時落到這一列（比照 dim_product 的 -1）。
-UNKNOWN_MEMBER_ID = "UNKNOWN"
-UNKNOWN_MEMBER_SK = -1
-UNKNOWN_MEMBER_NAME = "未知會員"
+# 沒有「未知會員」列（不比照 dim_product 的 -1）：訂單對不到會員版本時整列進訂單隔離表
+# （使用者定：「在訂單重要度之後是會員資料 如果有未知會員資料在做客戶分析是一件困難的事
+# 所以要有錯誤提醒修正data pipline」），fact 永遠不會指向未知會員，保留這一列只會讓人
+# 以為 fact 裡有未知會員的訂單。〔防護性設計：本資料 0 筆〕
 
 DIM_MEMBER_COLUMNS = (
     "member_sk",
@@ -67,11 +67,11 @@ DIM_MEMBER_COLUMNS = (
 class DimMemberBuild:
     """build_dim_member 的結果（只計算、未寫入）。
 
-    - changes：要 MERGE 進 dim_member 的列，只有「受這批影響的會員的所有版本＋未知會員列」；
+    - changes：要 MERGE 進 dim_member 的列，只有「受這批影響的會員的所有版本」；
       表原本不存在時才等於整張表。**不能拿去 resolve_member_sk**：
-      沒出現在這批的會員不在裡面，對應時會全部落到 -1。
+      沒出現在這批的會員不在裡面，他們的訂單會全部對不到。
     - rejected：違規列，形狀同 cast_to_contract 的 rejected_df（原始字串＋reject_reasons），
-      隔離表的寫入由呼叫端（T5）處理。
+      寫進會員隔離表由 write_dim_member 處理（write_member_quarantine）。
     - stats：計數，給對帳與報告用。
     """
 
@@ -185,7 +185,7 @@ def _fresh_snapshots(snapshots: DataFrame, existing: DataFrame | None) -> DataFr
     """
     if existing is None:
         return snapshots
-    seen = existing.filter(f"is_current AND member_sk <> {UNKNOWN_MEMBER_SK}").select(
+    seen = existing.filter("is_current").select(
         "member_id", F.col("last_seen_extract_date").alias("_seen")
     )
     return (
@@ -204,7 +204,7 @@ def _observations(fresh: DataFrame, existing: DataFrame | None) -> DataFrame:
     snap_obs = _snapshot_obs(fresh)
     if existing is None:
         return snap_obs
-    old_obs = existing.filter(F.col("member_sk") != UNKNOWN_MEMBER_SK).join(
+    old_obs = existing.join(
         fresh.select("member_id").distinct(), "member_id", "left_semi"
     )
     old_obs = old_obs.select(
@@ -264,29 +264,6 @@ def _versions(obs: DataFrame) -> DataFrame:
     ).select(*DIM_MEMBER_COLUMNS)
 
 
-def _unknown_row(spark: SparkSession) -> DataFrame:
-    return spark.createDataFrame(
-        [
-            (
-                UNKNOWN_MEMBER_SK,
-                UNKNOWN_MEMBER_ID,
-                UNKNOWN_MEMBER_NAME,
-                None,
-                None,
-                None,
-                None,
-                dt.date(1900, 1, 1),
-                CURRENT_VALID_TO,
-                True,
-                None,
-            )
-        ],
-        "member_sk BIGINT, member_id STRING, member_name STRING, member_level STRING,"
-        " city STRING, birth_date DATE, register_date DATE, valid_from DATE,"
-        " valid_to DATE, is_current BOOLEAN, last_seen_extract_date DATE",
-    )
-
-
 def _not_after(members: DataFrame, through: dt.date) -> DataFrame:
     """只留 extract_date <= through 的原始列。
 
@@ -320,7 +297,7 @@ def build_dim_member(
     rejected = rejected_cast.unionByName(rejected_extra, allowMissingColumns=True)
     snapshots = _normalize(ok)
     fresh = _fresh_snapshots(snapshots, existing)
-    table = _versions(_observations(fresh, existing)).unionByName(_unknown_row(spark))
+    table = _versions(_observations(fresh, existing))
 
     raw_ok = ok.agg(
         F.count(F.lit(1)).alias("n"),
@@ -349,8 +326,72 @@ def build_dim_member(
     return DimMemberBuild(changes=table, rejected=rejected, stats=stats)
 
 
+# 會員隔離表：會員快照的違規列（使用者定 B：另開會員隔離表，和訂單隔離表分開，
+# 「根據DE的慣例」）。〔防護性設計：本資料 0 筆〕
+# 欄位：原始字串（MEMBERS_SCHEMA 全部欄位）＋_source_error＋reject_reasons。
+# 快照日就是原始的 extract_date 欄，用它當識別，不另加 batch_id：members.csv 是累積的
+# 整份快照，每一批都會重讀到同樣的壞列；用 batch_id 分區會讓同一列在每批各出現一次，
+# 加 batch_id 欄（記最後寫入的批次）則會讓強制重跑舊批次時內容改變，不冪等。
+MEMBER_QUARANTINE_COLUMNS = (
+    *[f.name for f in MEMBERS_SCHEMA.fields],
+    SOURCE_ERROR_COL,
+    REJECT_REASONS_COL,
+)
+
+
+def _sql_str(v: str) -> str:
+    """Spark SQL 字串常值（replaceWhere 用）：跳脫反斜線與單引號。"""
+    return "'" + v.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def write_member_quarantine(
+    spark: SparkSession,
+    members: DataFrame,
+    rejected: DataFrame,
+    path: str | Path,
+    *,
+    through: dt.date,
+) -> None:
+    """把會員快照的違規列寫進會員隔離表，以「快照日」replaceWhere，重跑冪等。
+
+    - members：這次處理的原始快照（和傳給 build_dim_member 的同一份）；
+      取其中 extract_date <= through 的列（含解析不了的）出現過的 extract_date 原值，
+      當作這次負責的快照，先清掉這些快照的舊隔離列再寫入。
+      所以同一份快照不論被哪一批重讀幾次都只留一份；上游在同一個 extract_date 內修好壞列後
+      重跑，舊的隔離列也會被清掉。
+    - 限制：只清「這次讀到的 extract_date」。上游修的是 extract_date 本身（例如把
+      `2026-13-40` 改成 `2026-04-30`），或整份快照從 members.csv 消失時，舊值不會再被讀到，
+      它的隔離列會留在表裡（不影響 dim_member，只是隔離表多了過時的列）。
+    - through 之後的快照不在這次的範圍內，表裡它們的列不會被動到
+      （強制重跑較早的批次不會刪掉較晚快照的隔離列）。
+    """
+    path = str(path)
+    dates = [
+        r["extract_date"]
+        for r in _not_after(members, through)
+        .select("extract_date")
+        .distinct()
+        .collect()
+    ]
+    if not dates:
+        return
+    known = [_sql_str(d) for d in dates if d is not None]
+    conds = [f"extract_date IN ({', '.join(known)})"] if known else []
+    if len(known) < len(dates):  # extract_date 是 NULL 的壞列
+        conds.append("extract_date IS NULL")
+    rows = rejected.select(*MEMBER_QUARANTINE_COLUMNS)
+    rows.write.format("delta").mode("overwrite").option(
+        "replaceWhere", " OR ".join(conds)
+    ).save(path)
+
+
 def write_dim_member(
-    spark: SparkSession, members: DataFrame, path: str | Path, *, through: dt.date
+    spark: SparkSession,
+    members: DataFrame,
+    path: str | Path,
+    *,
+    through: dt.date,
+    quarantine_path: str | Path | None = None,
 ) -> DimMemberWrite:
     """把 extract_date <= through 的會員快照併入 dim_member，以 member_sk MERGE。
 
@@ -362,6 +403,10 @@ def write_dim_member(
     - 冪等：重送已處理過或更舊的快照列會被跳過，表內容不變。
     - 已存在的版本不會被刪：新快照只會在既有版本之後追加版本、更新 valid_to、
       is_current 與 Type 1 欄位，所以 MERGE（無 delete）就夠了。
+    - 違規列不參與建版本，所以壞列不會蓋掉該會員上一個好版本（沿用前版）；
+      quarantine_path 有給時寫進會員隔離表（write_member_quarantine）。
+      會員第一次出現就是壞列時不會有任何版本，他的訂單會在 fact_order 進訂單隔離表
+      （member_missing）。〔防護性設計：本資料 0 筆〕
     """
     path = str(path)
     existing = None
@@ -369,6 +414,10 @@ def write_dim_member(
         # 讀成快照並物化：來源與 MERGE 目標是同一張表，避免 MERGE 中途重讀
         existing = spark.read.format("delta").load(path).localCheckpoint()
     result = build_dim_member(spark, members, through=through, existing=existing)
+    if quarantine_path is not None:
+        write_member_quarantine(
+            spark, members, result.rejected, quarantine_path, through=through
+        )
     merge_upsert(spark, result.changes.localCheckpoint(), path, keys=["member_sk"])
     return DimMemberWrite(
         table=spark.read.format("delta").load(path),
@@ -384,15 +433,16 @@ def resolve_member_sk(
 
     - dim_df：**必須是整張 dim_member**（例如 write_dim_member 回傳的 table，
       或 spark.read.format("delta").load(path)）。若只給部分會員，其他會員的訂單會
-      靜默落到 -1，而 fact 列數不變，對帳抓不到。
+      對不到而被隔離，看起來像上游的問題。
     - date_col：fact_df 中 DateType 的欄位，應為台北時間的下單日
       （session timezone 是 Asia/Taipei，用
       to_date(parse_source_timestamp(order_created_at)) 先算出來）。
     - 版本區間是 valid_from <= 日期 < valid_to，互不重疊，所以每張單最多對到一版，
       fact_df 的列數不變。
-    - 對不到的（member_id 不存在或為 NULL、下單日早於 register_date）一律為 -1。
+    - 對不到的（member_id 不存在或為 NULL、下單日早於第一版的 valid_from）member_sk 為
+      NULL；呼叫端負責處理（fact_order 進訂單隔離表，見 member_missing_reason）。
     """
-    dim = dim_df.filter(F.col("member_sk") != UNKNOWN_MEMBER_SK).select(
+    dim = dim_df.select(
         F.col("member_id").alias("_dim_member_id"),
         F.col("valid_from").alias("_dim_valid_from"),
         F.col("valid_to").alias("_dim_valid_to"),
@@ -406,11 +456,40 @@ def resolve_member_sk(
     )
     return (
         fact_df.join(dim, cond, "left")
-        .withColumn(
-            "member_sk",
-            F.coalesce(
-                F.col("_dim_member_sk"), F.lit(UNKNOWN_MEMBER_SK).cast("bigint")
-            ),
-        )
+        .withColumn("member_sk", F.col("_dim_member_sk"))
         .drop("_dim_member_id", "_dim_valid_from", "_dim_valid_to", "_dim_member_sk")
     )
+
+
+def member_missing_reason(
+    unresolved: DataFrame, dim_df: DataFrame, date_col: str
+) -> DataFrame:
+    """替對不到版本的列加上 _member_reason（原因字串）：分「會員不在 dim_member」與
+    「下單日早於第一版」兩種，讓看隔離表的人知道該查快照還是查下單時間。
+
+    unresolved 應只含 resolve_member_sk 後 member_sk 為 NULL 的列；dim_df 是整張 dim_member。
+    〔防護性設計：本資料 0 筆〕
+    """
+    first = dim_df.groupBy(F.col("member_id").alias("_mm_id")).agg(
+        F.min("valid_from").alias("_mm_first")
+    )
+    joined = unresolved.join(first, unresolved["member_id"] == first["_mm_id"], "left")
+    day = F.date_format(F.col(date_col), "yyyy-MM-dd")
+    reason = F.when(
+        F.col("_mm_id").isNull(),
+        F.concat(
+            F.lit("member_id:會員 "),
+            F.coalesce(F.col("member_id"), F.lit("NULL")),
+            F.lit(" 不在 dim_member（會員快照沒有這位會員，或他的快照列都違規）"),
+        ),
+    ).otherwise(
+        F.concat(
+            F.lit("member_id:下單日 "),
+            day,
+            F.lit(" 早於會員 "),
+            F.col("member_id"),
+            F.lit(" 第一個版本的 valid_from "),
+            F.date_format("_mm_first", "yyyy-MM-dd"),
+        )
+    )
+    return joined.withColumn("_member_reason", reason).drop("_mm_id", "_mm_first")

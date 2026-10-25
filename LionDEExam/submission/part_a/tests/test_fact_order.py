@@ -23,26 +23,37 @@ from delta.tables import DeltaTable
 from pipeline import fact_order
 from pipeline.contracts import (
     FX_RATES_SCHEMA,
+    MEMBERS_SCHEMA,
+    ORDER_CURRENCIES,
     ORDERS_SCHEMA,
     PRODUCTS_SCHEMA,
     to_raw_schema,
 )
-from pipeline.delta_io import merge_upsert
-from pipeline.dim_member import UNKNOWN_MEMBER_SK, build_dim_member
+from pipeline.delta_io import (
+    ensure_check_constraints,
+    merge_upsert,
+    same_constraint_expr,
+    table_check_constraints,
+)
+from pipeline.dim_member import MEMBER_QUARANTINE_COLUMNS, build_dim_member
 from pipeline.dims import UNKNOWN_PRODUCT_SK, DuplicateKeyError, build_dim_product
 from pipeline.fact_order import (
     BASE_AS_OF,
     BASE_BATCH_ID,
+    FACT_CHECK_CONSTRAINTS,
     FACT_UPDATE_CONDITION,
+    AmountTotals,
     Category,
     ReferenceDataError,
     WarehousePaths,
+    amount_totals,
     load_base,
     load_order_batch,
     run_all,
     run_batch,
     transform_order_batch,
 )
+from pipeline.order_status import STATUSES
 from pipeline.order_status_check import STATE_SKIPPED_COL
 from pipeline.sources import DEFAULT_DATASET_DIR, CsvSource
 from pipeline.validation import cast_to_contract
@@ -311,11 +322,9 @@ def test_fact_order_unknown_product_falls_to_minus_one(spark, base_run, expected
     assert rec.unknown_product_rows == unknown.count() == 120
     assert unknown.filter(~F.col("product_id").startswith("P9")).count() == 0
     assert unknown.select("product_id").distinct().count() == 120
-    assert (
-        rec.unknown_member_rows
-        == fact.filter(F.col("member_sk") == UNKNOWN_MEMBER_SK).count()
-        == expected["unknown_member"]
-    )
+    # 會員對不到版本不落 -1、進隔離表：base 0 筆〔防護性設計：本資料 0 筆〕
+    assert rec.unknown_member_rows == expected["unknown_member"] == 0
+    assert fact.filter(F.col("member_sk").isNull()).count() == 0
 
 
 @pytest.mark.slow
@@ -361,7 +370,13 @@ FX_ROWS = ["2026-05-01,USD,30.5", "2026-05-01,JPY,0.2"]
 AS_OF = dt.date(2026, 4, 30)
 
 
-def _mini_dataset(dir_path: Path, products_rows=None, fx_rows=None):
+MINI_MEMBERS = [
+    "M1,王小明,一般,台北市,1990-01-01,2020-01-01,2026-04-30",
+    "M2,李小華,金卡,高雄市,1985-05-05,2021-02-02,2026-04-30",
+]
+
+
+def _mini_dataset(dir_path: Path, products_rows=None, fx_rows=None, members_rows=None):
     products_rows = products_rows or [
         "P00001,東京5日,團體旅遊,日本,東京,5,50000,Y",
         "P00002,紐約3日,訂房,美國,紐約,3,30000,Y",
@@ -372,11 +387,7 @@ def _mini_dataset(dir_path: Path, products_rows=None, fx_rows=None):
             "rate_date,currency,rate_to_twd",
             *(fx_rows or FX_ROWS),
         ],
-        "members.csv": [
-            MEMBERS_HEADER,
-            "M1,王小明,一般,台北市,1990-01-01,2020-01-01,2026-04-30",
-            "M2,李小華,金卡,高雄市,1985-05-05,2021-02-02,2026-04-30",
-        ],
+        "members.csv": [MEMBERS_HEADER, *(members_rows or MINI_MEMBERS)],
     }
     for name, lines in files.items():
         (dir_path / name).write_text("﻿" + "\n".join(lines) + "\n", encoding="utf-8")
@@ -429,17 +440,21 @@ def mini(mini_src, tmp_path):
     return mini_src, WarehousePaths(tmp_path / "wh")
 
 
-def _transform(spark, src, rows, *, existing=None, batch_id="t1"):
-    """只做轉換（transform_order_batch），不寫 Delta；回傳 (fact 列, 隔離列)。"""
+def _transform(spark, src, rows, *, existing=None, batch_id="t1", members=None):
+    """只做轉換（transform_order_batch），不寫 Delta；回傳 BatchTransform。
+
+    members：原始會員快照（字串 DataFrame）；None 時用 src 的 members.csv。
+    """
     products, _ = cast_to_contract(src.products(), PRODUCTS_SCHEMA)
     fx, _ = cast_to_contract(src.fx_rates(), FX_RATES_SCHEMA)
+    members = src.members() if members is None else members
     t = transform_order_batch(
         _orders_df(spark, rows),
         batch_id=batch_id,
         as_of=AS_OF,
         fx=fx,
         dim_product=build_dim_product(spark, products),
-        dim_member=build_dim_member(spark, src.members(), through=AS_OF).changes,
+        dim_member=build_dim_member(spark, members, through=AS_OF).changes,
         existing=existing,
     )
     return t
@@ -912,6 +927,7 @@ def test_fact_order_bad_reference_data_stops_whole_batch(
         paths.dim_member,
         paths.dim_date,
         paths.batch_log,
+        paths.member_quarantine,
     ):
         assert not DeltaTable.isDeltaTable(spark, str(table)), table
 
@@ -931,6 +947,91 @@ def test_fact_order_invalid_batch_id_is_rejected(spark, mini):
 
 def test_base_as_of_is_last_base_day():
     assert BASE_AS_OF == dt.date(2026, 6, 30)
+
+
+# ------------------------------------------------------------------ 會員對不到版本
+
+
+def _p2(row):
+    """把 _order 的 product_id 換成清單外的 P99999（V6：產品對不到落 -1、照寫）。"""
+    return (*row[:2], "P99999", *row[3:])
+
+
+def test_fact_order_member_missing_is_quarantined_not_minus_one(spark, mini_src):
+    # 使用者定：會員對不到版本 → 進隔離表，不落 -1；和 V6（產品對不到落 -1、照寫）刻意不同
+    # 〔防護性設計：本資料 0 筆〕
+    rows = [
+        _order("O1"),  # M1，對得到
+        _order("O2", member="M999"),  # 會員不在快照
+        # M2 的 register_date 是 2021-02-02：下單日早於第一版
+        _order(
+            "O3",
+            member="M2",
+            created="2021-02-01T10:00:00+08:00",
+            updated="2021-02-01T11:00:00+08:00",
+        ),
+        _p2(_order("O4")),  # 產品不在清單：照寫、product_sk = -1
+    ]
+    t = _transform(spark, mini_src, rows)
+    fact = {r.order_id: r.product_sk for r in t.fact.collect()}
+    assert set(fact) == {"O1", "O4"}
+    assert fact["O1"] != UNKNOWN_PRODUCT_SK and fact["O4"] == UNKNOWN_PRODUCT_SK
+    assert t.fact.filter(F.col("member_sk").isNull()).count() == 0
+    q = {
+        r.order_id: (r.reject_category, r.reject_reasons)
+        for r in t.quarantine.collect()
+    }
+    assert q == {
+        "O2": (
+            Category.MEMBER_MISSING,
+            [
+                (
+                    "member_id:會員 M999 不在 dim_member"
+                    "（會員快照沒有這位會員，或他的快照列都違規）"
+                )
+            ],
+        ),
+        "O3": (
+            Category.MEMBER_MISSING,
+            [
+                (
+                    "member_id:下單日 2021-02-01 早於會員 M2 第一個版本的 valid_from "
+                    "2021-02-02"
+                )
+            ],
+        ),
+    }
+    # 隔離列帶原始字串
+    raw = t.quarantine.filter("order_id = 'O3'").first()
+    assert raw.order_created_at == "2021-02-01T10:00:00+08:00"
+    assert t.fact.count() + t.quarantine.count() == len(rows)
+
+
+def _members_df(spark, lines):
+    """members.csv 的列（逗號分隔字串）→ 原始字串 DataFrame（和 CsvSource.members() 同形狀）。"""
+    rows = [(*x.split(","), None) for x in lines]
+    return spark.createDataFrame(rows, to_raw_schema(MEMBERS_SCHEMA))
+
+
+def test_fact_order_member_first_seen_as_bad_row_chains_to_order_quarantine(
+    spark, mini_src
+):
+    # 連鎖：M3 第一次出現就是壞列（等級不在清單）→ 進會員隔離表、不會有任何版本
+    # → 他的訂單對不到會員，進訂單隔離表（member_missing）。〔防護性設計：本資料 0 筆〕
+    members = _members_df(
+        spark,
+        [*MINI_MEMBERS, "M3,張三,鑽石,台北市,1990-01-01,2020-01-01,2026-04-30"],
+    )
+    dim = build_dim_member(spark, members, through=AS_OF)
+    assert [r.member_id for r in dim.rejected.collect()] == ["M3"]
+    assert dim.changes.filter("member_id = 'M3'").count() == 0
+    t = _transform(
+        spark, mini_src, [_order("O1"), _order("O2", member="M3")], members=members
+    )
+    assert [r.order_id for r in t.fact.collect()] == ["O1"]
+    assert [(r.order_id, r.reject_category) for r in t.quarantine.collect()] == [
+        ("O2", Category.MEMBER_MISSING)
+    ]
 
 
 # ------------------------------------------------------------------ 寫入行為（slow）
@@ -1074,3 +1175,141 @@ def test_fact_order_force_rerun_after_zero_row_batch_keeps_classification(
     q = _quarantine(spark, paths, "day2").collect()
     assert [r.reject_category for r in q] == [Category.ILLEGAL_TRANSITION]
     assert _fact_row(spark, paths, "B").order_status == "completed"
+
+
+# ------------------------------------------------------------------ 會員隔離表、CHECK（slow）
+
+BAD_MEMBER = "M3,張三,鑽石,台北市,1990-01-01,2020-01-01,2026-04-30"
+
+
+@pytest.mark.slow
+def test_member_quarantine_written_idempotent_and_chains_to_orders(spark, tmp_path):
+    # 會員快照的違規列寫進會員隔離表（和訂單隔離表分開），重跑不變兩份；
+    # M3 第一次出現就壞 → 他的訂單進訂單隔離表。〔防護性設計：本資料 0 筆〕
+    ds = tmp_path / "ds"
+    ds.mkdir()
+    _mini_dataset(ds, members_rows=[*MINI_MEMBERS, BAD_MEMBER])
+    mini = (CsvSource(spark, ds), WarehousePaths(tmp_path / "wh"))
+    rows = [_order("O1"), _order("O2", member="M3")]
+    rec = _run(spark, mini, rows)
+    _, paths = mini
+
+    def member_q():
+        return sorted(
+            spark.read.format("delta").load(str(paths.member_quarantine)).collect()
+        )
+
+    first = member_q()
+    assert [tuple(r) for r in first] == [
+        (
+            "M3",
+            "張三",
+            "鑽石",
+            "台北市",
+            "1990-01-01",
+            "2020-01-01",
+            "2026-04-30",
+            None,
+            ["member_level:不在等級清單（一般/銀卡/金卡/白金）"],
+        )
+    ]
+    assert list(first[0].asDict()) == list(MEMBER_QUARANTINE_COLUMNS)
+    assert rec.member_rejected_rows == 1
+    assert rec.unknown_member_rows == 1
+    assert rec.quarantined_by_category == {Category.MEMBER_MISSING: 1}
+    assert rec.balanced
+    assert [r.order_id for r in _fact(spark, paths).collect()] == ["O1"]
+    # 重跑同一批（同一份 members.csv 再讀一次）：會員隔離表不變、不重複
+    _run(spark, mini, rows)
+    assert member_q() == first
+    # 另一批也會重讀同一份快照：仍只有一份
+    _run(spark, mini, [_order("O9", updated=_upd(13))], batch_id="t2")
+    assert member_q() == first
+
+
+@pytest.mark.slow
+def test_fact_check_constraints_reject_writes_that_bypass_pipeline(spark, mini):
+    # 使用者定：Delta CHECK 是最後一道防線，擋得住繞過管線的寫入〔防護性設計：本資料 0 筆〕
+    _run(spark, mini, [_order("O1")])
+    _, paths = mini
+    path = str(paths.fact_order)
+    got = table_check_constraints(spark, path)
+    assert set(got) == {k.lower() for k in FACT_CHECK_CONSTRAINTS}
+    for k, v in FACT_CHECK_CONSTRAINTS.items():
+        assert same_constraint_expr(got[k.lower()], v)
+    version = DeltaTable.forPath(spark, path).history(1).first()["version"]
+    # 值域由唯一一份定義產生，不寫死
+    for v in (*STATUSES, *ORDER_CURRENCIES):
+        assert f"'{v}'" in " ".join(got.values())
+    good = _fact(spark, paths).limit(1).localCheckpoint()
+    bad_values = {
+        "amount_positive": {"amount": F.lit(Decimal("-1.00"))},
+        "order_status_valid": {"order_status": F.lit("refunded")},
+        "currency_valid": {"currency": F.lit("EUR")},
+        "member_sk_not_null": {"member_sk": F.lit(None).cast("bigint")},
+        "coupon_discount_non_negative": {"coupon_discount": F.lit(Decimal("-1.00"))},
+        "order_id_not_null": {"order_id": F.lit(None).cast("string")},
+    }
+    assert set(bad_values) == set(FACT_CHECK_CONSTRAINTS)
+    for name, cols in bad_values.items():
+        bad = good.withColumns(
+            {k: v.cast(good.schema[k].dataType) for k, v in cols.items()}
+        )
+        with pytest.raises(Exception, match=name):
+            bad.write.format("delta").mode("append").save(path)
+    assert _fact(spark, paths).count() == 1  # 違規列都沒寫進去
+    # 重跑：約束已存在、條件相同，不會報「已存在」，也不會 DROP 再 ADD
+    _run(spark, mini, [_order("O1")])
+    assert table_check_constraints(spark, path) == got
+    ops = [
+        r.operation
+        for r in DeltaTable.forPath(spark, path).history().collect()
+        if r.version > version
+    ]
+    assert ops and not any("CONSTRAINT" in op for op in ops), ops
+
+
+@pytest.mark.slow
+def test_amount_totals_exclude_review_orders_once_even_if_listed_in_two_batches(
+    spark, mini
+):
+    # 排除金額人工確認清單後的金額總和（使用者定 B1）。O2 疑似多乘 1,000
+    # （P00001 定價 50,000，金額 6,000,000，比值 120），在 t1、t2 兩批都寫進 fact，
+    # 所以兩批的清單都有它；排除時要先 DISTINCT，否則 join 會把它算兩次
+    _run(spark, mini, [_order("O1"), _order("O2", amount="6000000.0")])
+    _run(
+        spark,
+        mini,
+        [_order("O2", amount="6000000.0", updated=_upd(13), status="completed")],
+        batch_id="t2",
+    )
+    _, paths = mini
+    review = spark.read.format("delta").load(str(paths.amount_review))
+    assert sorted((r.batch_id, r.order_id) for r in review.collect()) == [
+        ("t1", "O2"),
+        ("t2", "O2"),
+    ]
+    assert amount_totals(spark, paths) == AmountTotals(
+        amount_twd_total=Decimal("6001000.00"),
+        amount_twd_excluding_review=Decimal("1000.00"),
+        review_orders=1,
+    )
+
+
+@pytest.mark.slow
+def test_ensure_check_constraints_does_not_drop_when_existing_data_violates(
+    spark, tmp_path
+):
+    # 改了約束條件、既有資料不符合新條件：丟錯而且不 DROP，舊約束留著
+    # （否則 DROP 成功、ADD 失敗，表會暫時沒有約束）〔防護性設計：本資料 0 筆〕
+    path = str(tmp_path / "t")
+    df = spark.createDataFrame([(1,), (2,)], "x INT")
+    merge_upsert(spark, df, path, ["x"], check_constraints={"x_pos": "x > 0"})
+    with pytest.raises(ValueError, match="x_pos"):
+        ensure_check_constraints(spark, path, {"x_pos": "x > 1"})
+    assert same_constraint_expr(table_check_constraints(spark, path)["x_pos"], "x > 0")
+    # 既有資料符合新條件：照常替換
+    ensure_check_constraints(spark, path, {"x_pos": "x > 0 AND x < 10"})
+    assert same_constraint_expr(
+        table_check_constraints(spark, path)["x_pos"], "x > 0 AND x < 10"
+    )

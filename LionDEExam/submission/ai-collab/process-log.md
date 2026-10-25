@@ -562,3 +562,25 @@ AI 的錯：試寫段落的處理理由寫了「因為沒辦法確定是不是�
 待使用者確認：正文結論第一句「要先排除 40 張金額多了 1,000 倍的訂單」。追查來源，這是白話改寫 agent 自己加的一句「代價是確認之前，營收報表要自己排除這 40 張」，process-log 沒有使用者這樣說過；主管版 agent 再把它升格成結論第一句。和冷讀 agent 的面談追問「V2 為何不先排除」直接相關。發現者：AI 自查（追查結論句的來源）。
 
 - 依據：`part_a/data-quality-report.md`（未 commit）
+
+### 2026-10-24｜Part A｜V2 的 40 張：留在 fact，正式營收在人工確認前排除
+
+A-3 主管版的結論第一句「要先排除 40 張金額多了 1,000 倍的訂單」是改寫 agent 自己加的，不是使用者的決定（見前一個事件）。AI 請使用者定營收報表的口徑：A 照算；B 確認前排除；C 含與不含兩個數字都給。AI 建議 C。使用者先問「V2是什麼」「以DE的角度需要先過濾離群質嗎」，AI 說明 DE 慣例是管線只偵測與標記、資料照原樣保留，要不要算由指標定義決定；明確是錯的資料（例如負數金額）才擋下。使用者選 B，理由：「因為已經有前面指標進入隔離我認為就應該人工審查後在進入下流」。
+
+AI 再指出 B 有兩種落實方式：B1 留在 fact、正式營收指標排除 `amount_review` 清單上的訂單；B2 改成進隔離表，會推翻原本「照原樣寫入」的決定，fact 從 99,950 變成 99,910。使用者確認目前 40 張會寫進 fact 之後，選 B1。
+
+- 依據：`part_a/data-quality-report.md`（結論句待改）；實作待派（README／model.md 補正式營收的定義與查詢）
+
+### 2026-10-24｜Part A｜共用業務假設文件；AI 誤稱官方沒寫 coupon 幣別
+
+使用者問「我目前做的業務假設有記錄下來嗎」，AI 查了之後回答：有記錄，但分散在 process-log、狀態機筆記、ADR、A-3 報告，沒有一份完整清單。使用者再問「只會用在part a嗎」，AI 說明 Part B 的審查、Part C 的語意層與 Text-to-SQL 名詞定義、進階模組都會用到，建議寫成一份放在 Part 之外的共用文件。使用者回「作」。產出 `business-assumptions.md`：使用者假設 19 條、AI 提出且使用者採用 4 條、官方說明對照 1 條；每條附原話、依據與衝突、用在哪裡、假設錯了會怎樣。
+
+AI 的錯：`notes/part_a/schema-inference/coupon-currency.md` 寫「官方 README 沒有說明 coupon_discount 的幣別」，但官方 `candidate_package/README.md` 的欄位說明寫著 “`coupon_discount`（TWD）”。A-3 報告附錄 D 因此把 coupon 幣別標成「使用者定案」。發現者：整理業務假設文件的 agent 比對官方 README 時發現。使用者的結論和官方一致，所以處理方式不變；notes 已加更正，A-3 附錄 D 待收尾時改成「官方說明」。
+
+- 依據：`business-assumptions.md`；`notes/part_a/schema-inference/coupon-currency.md` 的更正段
+
+### 2026-10-24｜Part A｜營收的定義不在 Part A 決定，移到 Part C 語意層
+
+為了落實 V2 的 B1（正式營收排除 `amount_review` 清單），實作 agent 寫了一條「正式營收」查詢，並先用「fact 所有狀態、折扣前 amount_twd」當口徑，再把「已取消算不算、折扣前或後」丟回來給使用者決定。使用者反問：「為什麼part a需要決策 營收要不要算已取消的訂單、用折扣前還是折扣後」。AI 承認這是指標定義、屬於語意層，是 AI 這邊把它帶進 Part A；建議 Part A 的文件與查詢不叫「營收」，改成照實描述欄位與範圍（例如「fact 的 amount_twd 總和，含所有狀態、折扣前」），營收的定義移到 Part C 的語意層題目一起決定。使用者回「照這樣改」。
+
+- 依據：實作待修（README、model.md、`fact_order.py` 的 `REVENUE_SQL` 命名與說明、A-3 報告用詞）；Part C 待辦加入營收定義

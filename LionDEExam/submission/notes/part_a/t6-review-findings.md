@@ -96,3 +96,19 @@ T6 通過後，又做了四件事：`cast_to_contract` 效能重構、net 變負
 ## 值得 review 的模式（後續修改）
 4. **實作者的效能宣稱被驗收者推翻，方向相反**：實作者說「量不出差異」，驗收者重量得到快 20～30%。量測環境（swap）會讓結論完全不同，量的宣稱一定要寫明條件。
 5. **驗收者拿使用者的原話檢查實作**：force 紀錄的問題不是程式錯，而是沒做到使用者定案時的理由。
+
+## 會員隔離、Delta CHECK、排除清單後總和的驗收（2026-10-24～25）
+使用者補定三項（會員對不到進隔離表、會員快照違規列另開隔離表、Delta CHECK）與 V2 的 B1 口徑後，由實作 agent 完成，兩位沒看過實作的驗收 agent 各驗一輪。
+
+| 輪 | 結論 | 最嚴重的問題 | 後續 |
+|---|---|---|---|
+| 1 | 有條件過（無高中嚴重度） | 會員隔離表在上游改了 extract_date 本身時舊列清不掉，docstring 寫過頭；CHECK 先 DROP 再 ADD，ADD 失敗時有空窗；後續狀態事件理論上可能被誤隔離成 member_missing | 1、3 改文件；2 改成 DROP 前先查違規列 |
+| 2 | 有條件過（只剩文件） | `pipeline/README.md` 對 CHECK 替換的敘述沒跟上新行為 | 主對話修正一句 |
+
+**確認正確的部分**
+- 第 1 輪：276 passed；用最終程式碼重跑冪等證明「全部相同」（第一次跑到一半機器休眠、JVM 被系統殺掉，`caffeinate -i` 重跑）；DuckDB 獨立重算 39,086,896,780.27／28,984,405,090.57／差額 10,102,491,689.70 吻合；壞列不蓋掉上一個好版本；直接 SQL `UPDATE` 寫違規值被 CHECK 拒絕。改壞 4 項（拿掉 member_missing、隔離表改 append、約束每次 ADD、拿掉 DISTINCT）都被測試抓到。
+- 第 2 輪：主對話特別請驗收者查「DROP 前檢查把 NULL 算成違規，會不會誤擋合法的 NULL」。實驗確認不會：`coupon_discount IS NULL OR >= 0` 遇到 NULL 照常替換；NULL 的判定和 Delta 自己 ADD CONSTRAINT 一致；正常重跑時約束文字比對相同，不會進入檢查與 DROP。
+
+**營收用詞**：使用者決定 Part A 不定義營收（process-log「營收的定義不在 Part A 決定，移到 Part C 語意層」）。`REVENUE_SQL`／`revenue()` 改名為 `AMOUNT_EXCLUDING_REVIEW_SQL`／`amount_totals()`，文件照實描述範圍（所有狀態、折扣前）。A-3 報告與 `data_quality_queries.py` 的「營收」用詞留到 A-3 收尾一起改。
+
+**實作者自己做的決定（驗收認為合理）**：拿掉 dim_member 的 -1 列；新類別 `member_missing` 放在對維度那一步；`unknown_member_rows` 改語意保留；會員隔離表以快照日 replaceWhere；CHECK 只加在 fact_order 6 條。

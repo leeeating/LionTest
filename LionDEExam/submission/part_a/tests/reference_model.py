@@ -6,7 +6,8 @@ test_fact_order.py（base）與 test_fact_order_incremental.py（base → day3�
 依序：合約（金額必須大於 0，V1；coupon 不可為 -1 以外的負數）→ coupon -1.0 轉 NULL（V3）
 → 同批撞號（ADR-03）
 → 完全重複（只算時間上相鄰的相同列）→ 與既有 fact 撞號 → 狀態機（晚到用可達性、
-逐段用可達性、同一秒不同狀態、不合法之後一起隔離）→ 匯率 → -1、net_amount_twd、
+逐段用可達性、同一秒不同狀態、不合法之後一起隔離）→ 匯率 → 會員對不到版本隔離
+→ product -1、net_amount_twd、
 金額人工確認清單（比值 > 100，或 coupon > amount_twd；同一列只算一次）。
 """
 
@@ -131,7 +132,7 @@ def chain(rows, fact_status):
 
 
 def reference():
-    """回傳 ({batch_id: 對帳數字}, 最後的 fact {order_id: (列, amount_twd, net)})。"""
+    """回傳 ({batch_id: 對帳數字, "amount_totals": 金額總和兩個數字}, 最後的 fact {order_id: (列, amount_twd, net)})。"""
     fx = {
         (r["rate_date"], r["currency"]): Decimal(r["rate_to_twd"])
         for r in read_csv("fx_rates.csv")
@@ -144,6 +145,7 @@ def reference():
         )
     fact = {}
     result = {}
+    review_ids = set()  # 曾列進金額人工確認清單的 order_id（任一批）
     for batch, name in FILES:
         rows = read_csv(name)
         cats = collections.Counter()
@@ -200,14 +202,16 @@ def reference():
             if nulled:  # V3：-1.0 代表未知，轉 NULL
                 coupon = None
             net = twd - Decimal(coupon) if coupon not in ("", None) else None
+            reg = register.get(r["member_id"])
+            if reg is None or day < reg:  # 會員對不到版本：進隔離表，不落 -1
+                cats["member_missing"] += 1
+                continue
             fact[r["order_id"]] = (r, twd, net)
             n["fact"] += 1
             total += twd
             net_total += net or 0
             p = products.get(r["product_id"])
             n["unknown_p"] += p is None
-            reg = register.get(r["member_id"])
-            n["unknown_m"] += reg is None or day < reg
             n["skip"] += skip
             n["coupon"] += nulled
             review = net is not None and net < 0
@@ -216,6 +220,8 @@ def reference():
                 if denom > 0 and (twd / denom).quantize(CENT) > REVIEW_RATIO:
                     review = True
             n["review"] += review
+            if review:
+                review_ids.add(r["order_id"])
         skipped = cats.pop("late_event", 0)
         result[batch] = {
             "input_rows": len(rows),
@@ -229,11 +235,19 @@ def reference():
             "amount_twd_sum": total,
             "net_amount_twd_sum": net_total,
             "unknown_product_rows": n["unknown_p"],
-            "unknown_member_rows": n["unknown_m"],
+            "unknown_member_rows": cats.get("member_missing", 0),
             "fact_table_rows": len(fact),
             "fact_table_amount_twd_sum": sum(t for _, t, _ in fact.values()),
             "fact_table_net_amount_twd_sum": sum(
                 x for _, _, x in fact.values() if x is not None
             ),
         }
+    # V2（B1）：fact 的 amount_twd 總和（所有狀態、折扣前），以及排除曾列進清單的訂單後的總和
+    result["amount_totals"] = {
+        "amount_twd_total": sum(t for _, t, _ in fact.values()),
+        "amount_twd_excluding_review": sum(
+            t for oid, (_, t, _) in fact.items() if oid not in review_ids
+        ),
+        "review_orders": sum(oid in review_ids for oid in fact),
+    }
     return result, fact

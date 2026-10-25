@@ -16,8 +16,6 @@ import pytest
 from pipeline.contracts import MEMBERS_SCHEMA, to_raw_schema
 from pipeline.dim_member import (
     CURRENT_VALID_TO,
-    UNKNOWN_MEMBER_ID,
-    UNKNOWN_MEMBER_SK,
     build_dim_member,
     resolve_member_sk,
     write_dim_member,
@@ -114,21 +112,19 @@ def full_dim(spark, source):
 def test_dim_member_versions_not_inflated_by_snapshots(full_dim):
     expected = _expected_versions()
     got = {
-        r.member_id: r["count"]
-        for r in full_dim.filter(full_dim.member_sk != UNKNOWN_MEMBER_SK)
-        .groupBy("member_id")
-        .count()
-        .collect()
+        r.member_id: r["count"] for r in full_dim.groupBy("member_id").count().collect()
     }
     assert got == expected
     total = sum(expected.values())
     assert total != 8991  # 原始列數；版本數若等於它，代表每列都開了版本
-    assert full_dim.count() == total + 1  # ＋未知會員
+    # 沒有未知會員列：會員對不到版本的訂單進隔離表，fact 不會指向未知會員
+    assert full_dim.count() == total
+    assert full_dim.filter("member_sk = -1 OR member_id = 'UNKNOWN'").count() == 0
 
 
 def test_dim_member_sk_unique_and_one_current_per_member(full_dim):
     assert full_dim.select("member_sk").distinct().count() == full_dim.count()
-    real = full_dim.filter(full_dim.member_sk != UNKNOWN_MEMBER_SK)
+    real = full_dim
     cur = real.filter("is_current").groupBy("member_id").count()
     assert cur.filter("count <> 1").count() == 0
     assert cur.count() == real.select("member_id").distinct().count()
@@ -246,9 +242,10 @@ def test_dim_member_resolve_sk_by_order_date(spark, full_dim):
         "O2": m4004[D("2025-06-22")],
         "O3": m4004[D("2026-05-31")],
         "O4": m4004[D("2026-05-31")],
-        "O5": UNKNOWN_MEMBER_SK,
-        "O6": UNKNOWN_MEMBER_SK,
-        "O7": UNKNOWN_MEMBER_SK,
+        # 對不到：NULL（不落 -1），由 fact_order 進隔離表
+        "O5": None,
+        "O6": None,
+        "O7": None,
     }
     assert out.count() == fact.count()
     assert out.columns == fact.columns + ["member_sk"]
@@ -259,8 +256,7 @@ def test_dim_member_resolve_sk_keeps_fact_row_count_on_real_dim(spark, full_dim)
     # 產生（每個版本的兩端各一張單），所以不寫死 sk；sk 的正確值由
     # test_dim_member_resolve_sk_by_order_date 與 golden 測試負責
     fact = (
-        full_dim.filter(full_dim.member_sk != UNKNOWN_MEMBER_SK)
-        .selectExpr(
+        full_dim.selectExpr(
             "member_id", "explode(array(valid_from, valid_to - 1)) AS order_date"
         )
         .filter("order_date < DATE'9999-01-01'")
@@ -269,7 +265,7 @@ def test_dim_member_resolve_sk_keeps_fact_row_count_on_real_dim(spark, full_dim)
     )
     out = resolve_member_sk(fact, full_dim, "order_date")
     assert out.count() == fact.count()
-    assert out.filter(f"member_sk = {UNKNOWN_MEMBER_SK}").count() == 0
+    assert out.filter("member_sk IS NULL").count() == 0
 
 
 # SELECT xxhash64('M004004', DATE'2025-06-22')，在獨立的 Spark session 實算後寫死
@@ -308,7 +304,7 @@ def test_dim_member_incremental_equals_all_at_once(spark, source, tmp_path):
         spark, _real_members(source, through="2026-05-31"), once, through=may31
     )
     assert _table_rows(spark, step) == _table_rows(spark, once)
-    assert sum(_expected_versions("2026-05-31").values()) + 1 == len(
+    assert sum(_expected_versions("2026-05-31").values()) == len(
         _table_rows(spark, step)
     )
 
@@ -366,7 +362,7 @@ def test_dim_member_write_returns_full_table_for_resolve(spark, source, tmp_path
         res = write_dim_member(
             spark, _real_members(source, only=day), path, through=D(day)
         )
-    expected_total = sum(_expected_versions().values()) + 1
+    expected_total = sum(_expected_versions().values())
     assert res.table.count() == expected_total
     fact = (
         source.members()
@@ -376,7 +372,7 @@ def test_dim_member_write_returns_full_table_for_resolve(spark, source, tmp_path
     )
     out = resolve_member_sk(fact, res.table, "order_date")
     assert out.count() == 8000
-    assert out.filter(f"member_sk = {UNKNOWN_MEMBER_SK}").count() == 0
+    assert out.filter("member_sk IS NULL").count() == 0
 
 
 def test_dim_member_through_excludes_future_snapshots(spark, source, tmp_path):
@@ -389,14 +385,10 @@ def test_dim_member_through_excludes_future_snapshots(spark, source, tmp_path):
     )
     assert _table_rows(spark, all_in) == _table_rows(spark, cut)
     assert res.stats["rows_after_through"] == 502
-    agg = (
-        res.table.filter(f"member_sk <> {UNKNOWN_MEMBER_SK}")
-        .agg(
-            F.max("valid_from").alias("vf"),
-            F.max("last_seen_extract_date").alias("seen"),
-        )
-        .first()
-    )
+    agg = res.table.agg(
+        F.max("valid_from").alias("vf"),
+        F.max("last_seen_extract_date").alias("seen"),
+    ).first()
     assert agg.vf <= may31 and agg.seen == may31
 
 
@@ -410,7 +402,7 @@ def test_dim_member_through_keeps_unparseable_extract_date_as_rejected(spark):
     res = build_dim_member(spark, _raw_df(spark, rows), through=D("2026-04-30"))
     assert [r.member_id for r in res.rejected.collect()] == ["A2"]
     assert res.stats["input_rows"] == 2 and res.stats["rows_after_through"] == 1
-    assert {r.member_id for r in res.changes.collect()} == {"A1", UNKNOWN_MEMBER_ID}
+    assert {r.member_id for r in res.changes.collect()} == {"A1"}
 
 
 def test_dim_member_through_uses_strict_date_rule(spark):
@@ -453,4 +445,40 @@ def test_dim_member_more_than_two_versions(spark):
     assert y == [
         ("台北市", D("2021-03-03"), D("2026-06-30")),
         ("高雄市", D("2026-06-30"), CURRENT_VALID_TO),
+    ]
+
+
+def test_dim_member_bad_row_does_not_overwrite_previous_good_version(spark):
+    # 壞列（等級不在清單）不參與建版本：A1 沿用 04-30 的好版本，05-31 的壞列不開新版、
+    # 也不把等級改掉；06-30 的好快照照常開新版。〔防護性設計：本資料 0 筆〕
+    rows = [
+        _member("A1", "銀卡", "台北市", "1990-01-01", "2020-01-01", "2026-04-30"),
+        _member("A1", "鑽石", "高雄市", "1990-01-01", "2020-01-01", "2026-05-31"),
+        _member("A1", "金卡", "台北市", "1990-01-01", "2020-01-01", "2026-06-30"),
+    ]
+    res = build_dim_member(spark, _raw_df(spark, rows), through=LAST)
+    assert [(r.member_id, r.extract_date) for r in res.rejected.collect()] == [
+        ("A1", "2026-05-31")
+    ]
+    got = [
+        (v.member_level, v.city, v.valid_from, v.valid_to)
+        for v in _versions(res.changes, "A1")
+    ]
+    assert got == [
+        ("銀卡", "台北市", D("2020-01-01"), D("2026-06-30")),
+        ("金卡", "台北市", D("2026-06-30"), CURRENT_VALID_TO),
+    ]
+
+
+def test_dim_member_bad_row_alone_keeps_previous_version_current(spark):
+    # 最新一批只有壞列：上一個好版本仍是目前版本
+    rows = [
+        _member("A1", "銀卡", "台北市", "1990-01-01", "2020-01-01", "2026-04-30"),
+        _member("A1", "銀卡", "台北市", "1990-01-01", "2026-06-01", "2026-05-31"),
+    ]
+    res = build_dim_member(spark, _raw_df(spark, rows), through=LAST)
+    assert res.stats["rejected_rows"] == 1
+    v = _versions(res.changes, "A1")
+    assert [(x.member_level, x.is_current, x.valid_to) for x in v] == [
+        ("銀卡", True, CURRENT_VALID_TO)
     ]

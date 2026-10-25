@@ -18,6 +18,8 @@
   - [4.4 dim_date](#44-dim_date)
   - [4.5 dim_member](#45-dim_member)
   - [4.6 fact_order、隔離表、對帳](#46-fact_order隔離表對帳)
+  - [4.7 Delta CHECK 約束](#47-delta-check-約束)
+  - [4.8 排除待確認清單後的金額總和](#48-排除待確認清單後的金額總和)
 - [5. 星型模型](#5-星型模型)
 - [6. 增量處理策略](#6-增量處理策略)
   - [6.1 執行方式](#61-執行方式)
@@ -85,8 +87,8 @@ part_a/
 │   ├── sources.py     來源讀取介面與 CSV 實作（檔案層級檢查）
 │   ├── validation.py  轉成合約型別、分出違規列（列層級檢查）
 │   ├── timeparse.py   來源時間字串的格式定義與解析
-│   ├── delta_io.py    Delta 表的 MERGE 寫入
-│   ├── dim_member.py  dim_member（SCD Type 2）
+│   ├── delta_io.py    Delta 表的 MERGE 寫入、CHECK 約束
+│   ├── dim_member.py  dim_member（SCD Type 2）、會員隔離表
 │   ├── dims.py        dim_product、dim_date
 │   ├── order_status.py        訂單狀態機的規則（合法轉移、可達性）
 │   ├── order_status_check.py  一批事件的狀態機分類
@@ -141,8 +143,10 @@ SparkSession 固定 `spark.sql.session.timeZone=Asia/Taipei`。下單時間有�
 - **第一版從 register_date 開始**：訂單可能早於第一次快照，也要對得到版本。之後的版本從觀察到變動的那一批 extract_date 開始，因為實際變動日落在兩次快照之間，資料推不出來。
 - **同日兩列取較高等級**（30 位會員）。
 - **假值不蓋真值**：`N/A`、`1900-01-01` 轉成 NULL，不會蓋掉之前已知的縣市或生日。
-- **代理鍵用 hash(member_id, valid_from)**，重跑穩定；fact 依台北下單日對到當時有效的版本，對不到的落到「未知會員」（-1）。未知會員列的 `valid_from` 是 1900-01-01、`register_date` 是 NULL，fact 對不到任何版本時直接給 -1，不靠這列的區間。
-- 三批處理完是 8,000 位會員、8,772 個版本（772 人有 2 個版本），另加 1 列未知會員。
+- **代理鍵用 hash(member_id, valid_from)**，重跑穩定；fact 依台北下單日對到當時有效的版本。
+- **對不到會員版本的訂單進隔離表，不落 -1**（使用者定：「在訂單重要度之後是會員資料 如果有未知會員資料在做客戶分析是一件困難的事 所以要有錯誤提醒修正data pipline」）。所以 dim_member 沒有「未知會員」列；和產品不同（V6：產品對不到落 -1、訂單照寫，因為商品會隨時間下架消失）。〔防護性設計：本資料 0 筆〕
+- **快照的違規列進會員隔離表** `quarantine_member`（等級不在清單、註冊日晚於快照日、格式錯誤等；使用者定：另開一張，和訂單隔離表分開，「根據DE的慣例」）：保留原始字串與原因，以快照日（`extract_date`）replaceWhere，每批重讀同一份 members.csv 也只留一份。壞列不參與建版本，不會蓋掉該會員上一個好版本；會員第一次出現就是壞列時沒有任何版本，他的訂單會依上一條進訂單隔離表。〔防護性設計：本資料 0 筆〕
+- 三批處理完是 8,000 位會員、8,772 個版本（772 人有 2 個版本）。
 
 ### 4.6 fact_order、隔離表、對帳
 - **一批一次呼叫**：`load_order_batch()` 依序更新維度、寫 fact_order 與隔離表、回傳對帳結果。base 是第一批（`load_base()`），每日增量用同一個函式逐日呼叫（`load_incremental()`），`run_all()` 用批次紀錄依序跑完。轉換步驟集中在 `transform_order_batch()`，不寫 Delta，測試直接驗它。
@@ -151,14 +155,15 @@ SparkSession 固定 `spark.sql.session.timeZone=Asia/Taipei`。下單時間有�
 - **撞號**：同一 order_id 但會員、下單時間、金額任一不同，整組進隔離表（ADR-03）。同批內、以及和既有 fact 比較都適用。
 - **金額**：存原幣別 `amount`（折扣前，J10）、原始 `currency`、`amount_twd`、`net_amount_twd`（＝`amount_twd − coupon_discount`，coupon 是台幣；coupon 為 NULL 時 net 也是 NULL）。`amount_twd` 用台北下單日當天的匯率；TWD、NTD 固定 1，匯率表用 left join，TWD 訂單不會因為匯率表沒有 TWD 而遺失（Part B 審查的 `buggy_pipeline.py` 用 inner join 弄丟了全部 TWD 訂單）。其他幣別找不到當天匯率就進隔離表，不拿前一天的匯率代替。
 - **參考資料有問題就整批停**：產品清單有違規列或 product_id 重複、匯率表有違規列或同日同幣別重複時，在寫任何表之前報錯（一律是 `ReferenceDataError`）。
-- **對不到維度落 -1**：product_id 不在清單、會員對不到版本時 sk＝-1，對帳另列筆數。
+- **產品對不到落 -1**：product_id 不在清單時 `product_sk`＝-1，訂單照寫，對帳另列筆數（V6）。
+- **會員對不到版本進隔離表**（`member_missing`）：會員不在快照、或下單日早於他的第一個版本時，整列進隔離表，原因分這兩種寫明；不落 -1。〔防護性設計：本資料 0 筆〕
 - **隔離表**：一張 Delta 表，每列有 batch_id、上游送來的原始字串、隔離類別與原因；以 replaceWhere 清掉同一批再寫，重跑不會變兩份。略過的晚到事件（`late_event`）也留在這裡，對帳時和隔離分開算。
-- **對帳**：每批證明「輸入＝寫進 fact＋隔離＋略過」，另附 amount_twd 與 net_amount_twd 總和（checksum）、落到 -1 的筆數、跳過中間狀態的筆數、coupon 轉 NULL 的筆數、金額人工確認清單筆數；不平就在寫入前報錯。
+- **對帳**：每批證明「輸入＝寫進 fact＋隔離＋略過」，另附 amount_twd 與 net_amount_twd 總和（checksum）、product 落到 -1 的筆數、會員對不到而隔離的筆數、會員快照違規列數、跳過中間狀態的筆數、coupon 轉 NULL 的筆數、金額人工確認清單筆數；不平就在寫入前報錯。
 - **截止日**：會員快照截止在 06-30；base 訂單的下單日都在 06-30 以前，但狀態最晚更新到 07-03（2,265 列的 updated_at 落在 07-01～07-03）。會員依下單日對版本，所以 base 的 as_of 用 06-30。dim_date 只依這批訂單擴充，base 跑完是 05-01～10-27。
 - **A-3 品質問題的處理**（使用者定案，見 process-log）：
   - V1 負數金額：合約擋下，進隔離表（`contract`）。
   - V3 coupon -1.0：代表「未知」，轉成 NULL，訂單照常寫入；轉了幾筆記在對帳（`coupon_nulled_rows`）。
-  - V2 疑似多乘 1,000：照原樣寫入 fact，另外列進人工確認清單 `amount_review`（Delta 表，依 batch_id replaceWhere）。判斷用比值 `amount_twd ÷（產品定價 × 數量）`：正常列落在 0.84～1.29，比值大於 100 的列入清單。**人工確認前，這些列會讓營收多算**（base 約 28%，見資料品質報告）。產品落到 -1 時沒有定價，算不出比值，不列入。
+  - V2 疑似多乘 1,000：照原樣寫入 fact，另外列進人工確認清單 `amount_review`（Delta 表，依 batch_id replaceWhere）。判斷用比值 `amount_twd ÷（產品定價 × 數量）`：正常列落在 0.84～1.29，比值大於 100 的列入清單。fact 的 amount_twd 總和包含這些列（base 約多 28%，見資料品質報告），所以下游在人工確認前要排除清單上的訂單（見「排除待確認清單後的金額總和」）。產品落到 -1 時沒有定價，算不出比值，不列入。
   - coupon 大於 amount_twd（net_amount_twd 為負）：照原樣寫入 fact，同樣列進 `amount_review`（使用者定 B：「太大的可能是全額折抵」）。清單每張單一列，`review_reasons` 記命中的原因，兩種都中時兩個都列。〔防護性設計：本資料 0 筆〕
   - coupon 為 -1 以外的負數：合約擋下，進隔離表（`contract`）。〔防護性設計：本資料 0 筆〕
   - completed 但出發日未到等：只記錄，照原樣寫入。
@@ -176,9 +181,66 @@ base 實跑結果（四批的完整對帳見「增量處理策略」）：
 | coupon -1.0 轉 NULL（V3，寫進 fact 的列） | 299 |
 | V2 人工確認清單 | 40 |
 | product_sk＝-1 | 120 |
-| member_sk＝-1 | 0 |
+| 隔離：會員對不到版本（`member_missing`） | 0 |
+| 會員快照違規列（會員隔離表） | 0 |
 | amount_twd 總和 | 35,969,473,520.09 |
 | net_amount_twd 總和（coupon 為 NULL 的列不計） | 35,783,693,189.25 |
+
+### 4.7 Delta CHECK 約束
+fact_order 建表時加上 Delta CHECK 約束，只加在關鍵欄位，當最後一道防線（使用者定：「Delta CHECK 是最後一道防線，擋得住繞過管線的寫入」）。〔防護性設計：本資料 0 筆〕
+
+| 約束 | 條件 |
+|---|---|
+| `order_id_not_null` | `order_id IS NOT NULL` |
+| `amount_positive` | `amount > 0` |
+| `coupon_discount_non_negative` | `coupon_discount IS NULL OR coupon_discount >= 0` |
+| `order_status_valid` | `order_status IN (...)`，由狀態清單 `order_status.STATUSES` 產生 |
+| `currency_valid` | `currency IN (...)`，由幣別清單 `contracts.ORDER_CURRENCIES` 產生 |
+| `member_sk_not_null` | `member_sk IS NOT NULL` |
+
+- 管線本身在合約層和對維度時已經擋下這些值，正常寫入不會觸發；約束存在表本身，擋的是 notebook 直接寫入、手動 `UPDATE` 這類繞過管線的寫入，違反時整次寫入失敗。
+- 建表時先建空表、加約束，再寫入第一批資料；重跑時約束已存在且條件相同就不動，所以冪等。
+- 只加在 fact_order：維度表由管線從參考資料重算，隔離表與金額人工確認清單本來就放有問題的列。
+- 測試：繞過管線直接 append 一列違規資料到 fact，六個約束各自擋下（`test_fact_check_constraints_reject_writes_that_bypass_pipeline`）。
+
+### 4.8 排除待確認清單後的金額總和
+金額人工確認清單 `amount_review` 上的訂單仍寫在 fact（V2 照原樣寫入）；使用者定 B1：下游在人工確認前排除清單上的訂單（不論原因是疑似多乘 1,000 或折扣大於金額），理由：「因為已經有前面指標進入隔離我認為就應該人工審查後在進入下流」。管線提供一段查詢，算出排除清單前後的 `amount_twd` 總和。
+
+- **範圍**：fact 所有訂單狀態（含 cancelled）、折扣前的 `amount_twd`。只照實描述這兩個數字怎麼算，不是「營收」的定義。
+- **營收的定義**（是否含取消單、用折扣前或折扣後）由下游語意層決定，見 Part C。
+- 清單依批次 replaceWhere，同一張單可能出現在不只一批的清單，所以先 `DISTINCT order_id` 再排除。
+- 不另建表或 view：一段查詢就算得出來；`run.py` 結束時會印出這兩個數字（`fact_order.amount_totals()`，跑的是同一段 SQL `AMOUNT_EXCLUDING_REVIEW_SQL`）。
+
+查詢（Spark SQL 讀 Delta；`<out>` 換成 `--out` 指定的輸出目錄）：
+
+```sql
+SELECT
+  SUM(f.amount_twd) AS amount_twd_total,
+  SUM(CASE WHEN r.order_id IS NULL THEN f.amount_twd END) AS amount_twd_excluding_review,
+  COUNT(r.order_id) AS review_orders
+FROM delta.`<out>/fact_order` AS f
+LEFT JOIN (SELECT DISTINCT order_id FROM delta.`<out>/amount_review`) AS r
+  ON f.order_id = r.order_id
+```
+
+執行方式（在 repo 根目錄）：
+
+```bash
+PYTHONPATH=LionDEExam/submission/part_a uv run python -c "
+from pipeline.fact_order import AMOUNT_EXCLUDING_REVIEW_SQL
+from pipeline.session import build_spark
+spark = build_spark(app_name='amount-totals')
+spark.sql(AMOUNT_EXCLUDING_REVIEW_SQL.format(fact_order='<out>/fact_order', amount_review='<out>/amount_review')).show(truncate=False)
+"
+```
+
+三天跑完（base → day3）的結果（`python -m pipeline.run` 實跑，2026-10-24；上面的查詢讀同一個倉儲結果相同）：
+
+| 項目 | 金額（TWD） |
+|---|---|
+| fact 全表 amount_twd 總和（所有狀態、折扣前） | 39,086,896,780.27 |
+| 排除待確認清單上 40 張後的總和 | 28,984,405,090.57 |
+| 差額（清單上訂單的 amount_twd） | 10,102,491,689.70 |
 
 ## 5. 星型模型
 見 [`model.md`](model.md)：模型圖、各表粒度與欄位、dim_member SCD2 規則、fact 怎麼接維度、金額換算、已知限制。數字是 base 載入後量的，三個增量檔處理完後會更新。
@@ -216,6 +278,7 @@ base 實跑結果（四批的完整對帳見「增量處理策略」）：
 | 第一個不合法或同一秒衝突之後的同批事件 | 一起隔離，fact 停在最後一個合法狀態〔防護性設計：本資料 0 筆〕 | `after_illegal` | 0 | 0 | 0 | 0 |
 | 下單日找不到匯率 | 隔離，不拿前一天代替〔防護性設計：本資料 0 筆〕 | `fx_missing` | 0 | 0 | 0 | 0 |
 | A-3 品質規則 | 目前沒有規則 | `quality` | 0 | 0 | 0 | 0 |
+| 會員對不到下單日當時的版本（不在快照，或下單日早於第一版） | 隔離，不落 -1〔防護性設計：本資料 0 筆〕 | `member_missing` | 0 | 0 | 0 | 0 |
 | coupon＝-1.0（V3，代表未知） | 轉 NULL，照常寫入，只計數 | （寫入，計數 `coupon_nulled_rows`） | 299 | 0 | 0 | 0 |
 | 金額比值 > 100（V2，疑似多乘 1,000） | 照常寫入，另列人工確認清單 `amount_review` | （寫入，計數 `amount_review_rows`） | 40 | 0 | 0 | 0 |
 | coupon > amount_twd（net 為負） | 照常寫入，另列人工確認清單 `amount_review`〔防護性設計：本資料 0 筆〕 | （寫入，計數 `amount_review_rows`） | 0 | 0 | 0 | 0 |
@@ -223,9 +286,9 @@ base 實跑結果（四批的完整對帳見「增量處理策略」）：
 狀態機的判斷全部用**可達性**（這個狀態能不能經過 0 步以上走到那個狀態），不用一步轉移表。原因是無法確定上游送的是事件還是快照，兩次快照之間的中間狀態可能沒拍到。合法的一步轉移只有 created→paid、created→cancelled、paid→cancelled、paid→completed（假設流程單向，見 `notes/part_a/order-state-machine.md`）。
 
 ### 6.3 三天實跑的對帳
-`python -m pipeline.run` 的輸出（2026-10-19）：
+`python -m pipeline.run` 的輸出（2026-10-19；2026-10-24 改成會員對不到進隔離表後重跑，數字相同）：
 
-| 批次 | 輸入 | 寫進 fact | 隔離 | 略過 | 跳過中間狀態 | coupon 轉 NULL | 金額人工確認清單 | product -1 | member -1 | 本批 amount_twd | 本批 net_amount_twd |
+| 批次 | 輸入 | 寫進 fact | 隔離 | 略過 | 跳過中間狀態 | coupon 轉 NULL | 金額人工確認清單 | product -1 | 會員對不到（隔離） | 本批 amount_twd | 本批 net_amount_twd |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | base | 100,040 | 99,950 | 90 | 0 | 0 | 299 | 40 | 120 | 0 | 35,969,473,520.09 | 35,783,693,189.25 |
 | day1 | 4,615 | 4,000 | 615 | 0 | 0 | 0 | 0 | 0 | 0 | 1,056,883,370.88 | 1,055,002,970.88 |
@@ -261,35 +324,37 @@ base 實跑結果（四批的完整對帳見「增量處理策略」）：
 3. **修正**：建議由上游重送一筆 `updated_at` 較新的正確事件，管線照常處理；上游無法重送時，另建人工修正表，由管線在處理增量時套用。人工修正表目前沒有實作。
 
 ## 7. 冪等證明
-「同一批跑兩次結果相同」不能只看 Delta history 的 operationMetrics：MERGE 重寫同樣的值也會算成 updated。所以直接比內容：fact 筆數、amount_twd 與 net_amount_twd 總和，以及 fact、隔離表、金額人工確認清單（amount_review）、dim_member、dim_product、dim_date 六張表的整表內容 hash，再加上該批的對帳數字。整表 hash 的算法是每列轉成 JSON 取 sha256，排序後再整體取 sha256，與列順序、檔案切法無關。
+「同一批跑兩次結果相同」不能只看 Delta history 的 operationMetrics：MERGE 重寫同樣的值也會算成 updated。所以直接比內容：fact 筆數、amount_twd 與 net_amount_twd 總和，以及 fact、隔離表、金額人工確認清單（amount_review）、會員隔離表（quarantine_member）、dim_member、dim_product、dim_date 七張表的整表內容 hash，再加上該批的對帳數字。整表 hash 的算法是每列轉成 JSON 取 sha256，排序後再整體取 sha256，與列順序、檔案切法無關。
 
 腳本：`profiling/idempotency_proof.py`。兩個實驗：
 
 1. **強制重跑**：跑完 base → day3 後，每個增量檔用 `force=True` 再實際跑一次（不被批次紀錄跳過），和第一次的結果比。對帳數字不比「寫入當下的整表欄位」（`fact_table_*`）：在 day3 之後重跑 day1，整表本來就比第一次跑 day1 時大。
 2. **中途當掉**：另一個倉儲跑完 base → day2，接著處理 day3：第一次在隔離表已寫、MERGE fact 之前當掉；重跑又在 MERGE fact 之後、寫批次紀錄之前當掉；第三次正常完成。每個時點都確認沒有 day3 的批次紀錄，最後和沒當掉的倉儲比。
 
-輸出（本機，2026-10-19）：
+輸出（本機，2026-10-24）：
 
 **實驗 1：每個增量檔強制重跑一次（force=True，實際執行）**
 
-| 時點 | fact 筆數 | amount_twd 總和 | net_amount_twd 總和 | fact hash | 隔離表筆數 | 隔離表 hash | 金額人工確認清單 hash | 維度表 hash（member/product/date） | 該批對帳數字與第一次相同 |
-|---|---|---|---|---|---|---|---|---|---|
-| 第一次跑完 base→day3 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | — |
-| 重跑 day1 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | 是 |
-| 重跑 day2 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | 是 |
-| 重跑 day3 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | 是 |
+| 時點 | fact 筆數 | amount_twd 總和 | net_amount_twd 總和 | fact hash | 隔離表筆數 | 隔離表 hash | 金額人工確認清單 hash | 會員隔離表 hash | 維度表 hash（member/product/date） | 該批對帳數字與第一次相同 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 第一次跑完 base→day3 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b0c44298fc | 765611be/461e56f0/5114d583 | — |
+| 重跑 day1 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b0c44298fc | 765611be/461e56f0/5114d583 | 是 |
+| 重跑 day2 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b0c44298fc | 765611be/461e56f0/5114d583 | 是 |
+| 重跑 day3 之後 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b0c44298fc | 765611be/461e56f0/5114d583 | 是 |
 
 **實驗 2：day3 在 MERGE 前當掉、重跑又在 MERGE 後當掉，第三次完成**
 
-| 時點 | fact 筆數 | amount_twd 總和 | net_amount_twd 總和 | fact hash | 隔離表筆數 | 隔離表 hash | 金額人工確認清單 hash | 維度表 hash（member/product/date） | day3 對帳數字與沒當掉時相同 |
-|---|---|---|---|---|---|---|---|---|---|
-| 當掉前（base→day2 跑完） | 108,010 | 38065915115.08 | 37876347234.24 | a672a4260958 | 1,345 | 62e321926a03 | bc8770de6dd1 | e3b96f2c/461e56f0/bc81004b | — |
-| 第一次：MERGE 前當掉（批次紀錄：無；fact 未變） | 108,010 | 38065915115.08 | 37876347234.24 | a672a4260958 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | — |
-| 第二次：MERGE 後當掉（批次紀錄：無） | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | — |
-| 第三次：重跑完成 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | 是 |
-| 對照：倉儲 A 沒當掉 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b96f2c/461e56f0/5114d583 | — |
+| 時點 | fact 筆數 | amount_twd 總和 | net_amount_twd 總和 | fact hash | 隔離表筆數 | 隔離表 hash | 金額人工確認清單 hash | 會員隔離表 hash | 維度表 hash（member/product/date） | day3 對帳數字與沒當掉時相同 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 當掉前（base→day2 跑完） | 108,010 | 38065915115.08 | 37876347234.24 | a672a4260958 | 1,345 | 62e321926a03 | bc8770de6dd1 | e3b0c44298fc | 765611be/461e56f0/bc81004b | — |
+| 第一次：MERGE 前當掉（批次紀錄：無；fact 未變） | 108,010 | 38065915115.08 | 37876347234.24 | a672a4260958 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b0c44298fc | 765611be/461e56f0/5114d583 | — |
+| 第二次：MERGE 後當掉（批次紀錄：無） | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b0c44298fc | 765611be/461e56f0/5114d583 | — |
+| 第三次：重跑完成 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b0c44298fc | 765611be/461e56f0/5114d583 | 是 |
+| 對照：倉儲 A 沒當掉 | 112,010 | 39086896780.27 | 38895390049.43 | 6c54abe0bd61 | 1,960 | 507b615cb601 | bc8770de6dd1 | e3b0c44298fc | 765611be/461e56f0/5114d583 | — |
 
 結論：全部相同（hash 只顯示前 12 碼，維度表前 8 碼）
+
+會員隔離表的 hash `e3b0c44298fc` 是空表的 sha256（本資料 0 筆違規列）；dim_member 的 hash 和 2026-10-19 那次不同，是因為拿掉了未知會員列。
 
 平常的重跑則由批次紀錄直接跳過，不會重新執行（`tests/test_fact_order_incremental.py` 的 `test_incremental_run_all_again_skips_every_batch`）。
 
@@ -297,7 +362,9 @@ base 實跑結果（四批的完整對帳見「增量處理策略」）：
 見 [`data-quality-report.md`](data-quality-report.md)（撰寫中）：每個問題的描述、影響筆數、偵測查詢與輸出、處理決策與理由。查詢腳本在 `profiling/data_quality_queries.py`。
 
 ## 9. 已知限制
-- **schema 變動後需重建倉儲**：沒有做 schema 遷移。例如批次紀錄新增 `reference_sha256`、金額人工確認清單新增三欄之後，用舊版程式建好的倉儲不能直接接著跑（MERGE、replaceWhere 會因 schema 不符失敗），要刪掉輸出目錄重跑。
+- **schema 變動後需重建倉儲**：沒有做 schema 遷移。例如批次紀錄新增 `reference_sha256`、金額人工確認清單新增三欄之後，用舊版程式建好的倉儲不能直接接著跑（MERGE、replaceWhere 會因 schema 不符失敗），要刪掉輸出目錄重跑。拿掉「未知會員」列之後也一樣：舊倉儲的 dim_member 還留著 -1 那列（MERGE 不刪列），要重建。
+- **會員隔離表清不掉「改了快照日」的舊列**〔防護性設計：本資料 0 筆〕：會員隔離表以這次讀到的 `extract_date` replaceWhere。上游修的是 `extract_date` 本身（例如 `2026-13-40` 改成 `2026-04-30`），或整份快照從 members.csv 消失時，舊值不會再被讀到，它的隔離列會留在表裡，要人工刪。不影響 dim_member。
+- **既有訂單的後續事件可能被隔離成 `member_missing`**〔防護性設計：本資料 0 筆〕：會員對版本用的是「這批」讀到的 dim_member。訂單第一次寫進 fact 時對得到會員，之後如果 dim_member 變了（例如會員快照被上游改掉、倉儲重建時少了某位會員），同一張訂單後續的狀態事件會對不到會員而進隔離表，fact 停在舊狀態。
 - **會員快照必須依日期順序處理**：dim_member 用 `last_seen_extract_date` 擋掉重送的舊快照，判斷以會員為單位。如果 05-31 的快照比 06-30 晚送到，兩批都出現的會員，05-31 那一版會被跳過，中間那段歷史會遺失（例如 05-31 升金卡、06-30 降回一般，表裡看不到金卡那一版）。管線靠批次紀錄強制依序處理來避免：前一批沒完成就拒絕跑下一批（`BatchOrderError`）。本題資料沒有同時出現在 05-31 與 06-30 的會員，所以目前的結果不受影響。
 
 - **重跑依賴 Delta time travel，有保存期限**：當掉後重跑、`--force` 重跑都要讀「這批開始之前」的 fact 版本。對 fact 執行 VACUUM 後，舊版本的資料檔被刪掉，這時重跑會直接報錯（不會默默算錯）；超過 Delta log 的保存期限（`delta.logRetentionDuration`，預設 30 天）後，舊版本也讀不到。正式環境要讓重跑的時間窗短於保存期限，或在 VACUUM 前確認沒有待重跑的批次。

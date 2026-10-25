@@ -12,7 +12,8 @@
 
 比對的內容（不看 Delta operationMetrics：MERGE 重寫同值也會算 updated）：
 fact 筆數、amount_twd 與 net_amount_twd 總和、以下各表的整表內容 hash：fact、隔離表、
-金額人工確認清單（amount_review）、dim_member、dim_product、dim_date；
+金額人工確認清單（amount_review）、會員隔離表（quarantine_member）、dim_member、
+dim_product、dim_date；
 以及該批的對帳數字（BatchCounts，不含完成時間與寫入當下的整表數字 fact_table_*）。
 """
 
@@ -52,21 +53,24 @@ class Snapshot:
     quarantine_rows: int
     quarantine_hash: str
     review_hash: str
+    member_quarantine_hash: str
     dims_hash: str  # dim_member、dim_product、dim_date 各自 hash 前 8 碼，以 / 串接
 
     def cells(self, short) -> str:
         return (
             f"{self.fact_rows:,} | {self.amount_twd_sum} | {self.net_amount_twd_sum} | "
             f"{short(self.fact_hash)} | {self.quarantine_rows:,} | "
-            f"{short(self.quarantine_hash)} | {short(self.review_hash)} | {self.dims_hash}"
+            f"{short(self.quarantine_hash)} | {short(self.review_hash)} | "
+            f"{short(self.member_quarantine_hash)} | {self.dims_hash}"
         )
 
 
 HEADER = (
     "| 時點 | fact 筆數 | amount_twd 總和 | net_amount_twd 總和 | fact hash | 隔離表筆數 "
-    "| 隔離表 hash | 金額人工確認清單 hash | 維度表 hash（member/product/date） | {last} |"
+    "| 隔離表 hash | 金額人工確認清單 hash | 會員隔離表 hash "
+    "| 維度表 hash（member/product/date） | {last} |"
 )
-RULE = "|---|---|---|---|---|---|---|---|---|---|"
+RULE = "|---|---|---|---|---|---|---|---|---|---|---|"
 
 
 def table_hash(df: DataFrame) -> str:
@@ -100,6 +104,7 @@ def snapshot(spark: SparkSession, paths: WarehousePaths) -> Snapshot:
         quarantine_rows=q.count(),
         quarantine_hash=table_hash(q),
         review_hash=table_hash(load(paths.amount_review)),
+        member_quarantine_hash=table_hash(load(paths.member_quarantine)),
         dims_hash=dims,
     )
 

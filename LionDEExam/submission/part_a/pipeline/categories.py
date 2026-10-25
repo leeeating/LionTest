@@ -22,6 +22,9 @@ class Category:
     COLLISION_EXISTING = "collision_existing"  # 與既有 fact 撞號
     FX_MISSING = "fx_missing"  # 下單日找不到匯率
     QUALITY = "quality"  # A-3 品質規則（目前沒有規則）
+    # 會員對不到下單日當時的版本（不在快照，或下單日早於第一版）；不落 -1
+    # 〔防護性設計：本資料 0 筆〕
+    MEMBER_MISSING = "member_missing"
     # ---- 狀態機（order_status_check）
     SUPERSEDED = "superseded"  # 合法，但同批有較新的合法事件
     LATE_EVENT = "late_event"  # 晚到、走得到 fact 現況：略過

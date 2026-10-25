@@ -3,7 +3,9 @@
 **結論〔使用者判斷〕：coupon_discount 是台幣（TWD），不跟著訂單的幣別。** 使用者原話：「coupon 當 TWD，三種幣別面額一樣」。
 
 ## 為什麼要判斷
-官方 README 沒有說明 coupon_discount 的幣別。fact_order 存的是原值，沒有換算。如果之後要算「折扣後的台幣營收」，就要先知道 coupon 能不能直接拿台幣去減，還是要先換匯。
+〔2026-10-24 更正〕原本這裡寫「官方 README 沒有說明 coupon_discount 的幣別」，這是錯的：`candidate_package/README.md` 的欄位說明寫著 “`coupon_discount`（TWD）”。整理業務假設文件的 agent 比對官方 README 時發現。使用者的結論（coupon 是 TWD）和官方說明一致，下面的資料證據仍然成立，現在是佐證官方說明，而不是唯一依據。
+
+當時以為官方沒有說明 coupon_discount 的幣別。fact_order 存的是原值，沒有換算。如果之後要算「折扣後的台幣營收」，就要先知道 coupon 能不能直接拿台幣去減，還是要先換匯。
 
 ## 證據
 **1. 三種幣別的面額完全一樣**

@@ -12,7 +12,10 @@
   TWD、NTD 固定 1（匯率表沒有 TWD，不能 inner join）。非 TWD／NTD 找不到當天匯率 → 隔離，
   不拿前一天的匯率代替。
 - 產品清單有 rejected 列 → 整批停（ReferenceDataError），在寫任何表之前檢查。
-- product_id 不在清單、會員對不到版本 → -1，對帳另列筆數。
+- product_id 不在清單 → -1，訂單照寫，對帳另列筆數（V6：商品會隨時間下架消失，盡量保留訂單）。
+- 會員對不到下單日當時的版本 → 整列進隔離表（member_missing），不落 -1（使用者定：
+  會員是客戶分析的主體，對不到代表管線或上游有錯，要提醒修正）。〔防護性設計：本資料 0 筆〕
+- fact_order 建表時帶 Delta CHECK 約束（FACT_CHECK_CONSTRAINTS），擋繞過管線的寫入。
 - 隔離表：一張 Delta 表，每列帶 batch_id、原始字串、reject_category、reject_reasons；
   以 replaceWhere 清掉同一 batch_id 再寫，重跑冪等。略過的列（late_event）也存在這裡。
 - 對帳：輸入列數＝寫進 fact＋隔離＋略過，用 count() 計算（build_spark() 的設定下才準）。
@@ -20,7 +23,7 @@
 一批的處理順序（每一步淘汰的列都帶著原因進隔離表，所以各類別互斥、加總等於輸入）：
   ① 合約轉型（cast_to_contract）→ ② 同批撞號 → ③ 完全重複去重（duplicate）
   → ④ 與既有 fact 撞號 → ⑤ 狀態機（order_status_check）→ ⑥ 匯率
-  → ⑦ 品質規則（A-3，目前沒有規則）→ ⑧ 對維度 → 寫入
+  → ⑦ 品質規則（A-3，目前沒有規則）→ ⑧ 對維度（會員對不到版本進隔離表）→ 寫入
 
 純轉換在 transform_order_batch（不寫 Delta，測試直接驗 DataFrame）；
 load_order_batch 負責參考資料檢查、維度寫入、對帳與寫入；run_all 用批次紀錄依序跑完
@@ -52,7 +55,11 @@ from pipeline.contracts import (
     SOURCE_ERROR_COL,
 )
 from pipeline.delta_io import merge_upsert
-from pipeline.dim_member import UNKNOWN_MEMBER_SK, resolve_member_sk, write_dim_member
+from pipeline.dim_member import (
+    member_missing_reason,
+    resolve_member_sk,
+    write_dim_member,
+)
 from pipeline.dims import (
     UNKNOWN_PRODUCT_SK,
     DuplicateKeyError,
@@ -61,6 +68,7 @@ from pipeline.dims import (
     write_dim_date,
     write_dim_product,
 )
+from pipeline.order_status import STATUSES
 from pipeline.order_status_check import (
     STATE_CATEGORY_COL,
     STATE_REASON_COL,
@@ -189,6 +197,32 @@ FACT_ORDER_COLUMNS = (
     BATCH_ID_COL,
 )
 
+
+def _sql_in(col: str, values: tuple[str, ...]) -> str:
+    """`col IN ('a', 'b')`；值是程式裡的常數，不含引號或反斜線。"""
+    assert all("'" not in v and "\\" not in v for v in values), values
+    quoted = ", ".join(f"'{v}'" for v in values)
+    return f"{col} IN ({quoted})"
+
+
+# fact_order 的 Delta CHECK 約束：只加在關鍵欄位，當最後一道防線（使用者定 B：
+# 「Delta CHECK 是最後一道防線，擋得住繞過管線的寫入」）。管線本身已在合約層與
+# ⑧ 對維度擋下這些值，所以走管線的寫入永遠不會觸發；它擋的是 notebook 直接寫入、
+# 手動 UPDATE 這類繞過管線的寫入。值域引用唯一一份定義（order_status.STATUSES、
+# contracts.ORDER_CURRENCIES），不寫死。〔防護性設計：本資料 0 筆〕
+FACT_CHECK_CONSTRAINTS: dict[str, str] = {
+    # MERGE 的鍵；NULL 的 order_id 每次 MERGE 都對不到，會一直重複插入
+    "order_id_not_null": "order_id IS NOT NULL",
+    # V1：負數、0 的金額在合約層隔離
+    "amount_positive": "amount > 0",
+    # V3：-1.0 轉 NULL，其他負數在合約層隔離；net_amount_twd 依賴它
+    "coupon_discount_non_negative": "coupon_discount IS NULL OR coupon_discount >= 0",
+    "order_status_valid": _sql_in("order_status", STATUSES),
+    "currency_valid": _sql_in("currency", ORDER_CURRENCIES),
+    # 會員對不到版本進隔離表，fact 一定對得到會員
+    "member_sk_not_null": "member_sk IS NOT NULL",
+}
+
 QUARANTINE_COLUMNS = (
     BATCH_ID_COL,
     *[f.name for f in ORDERS_SCHEMA.fields],
@@ -250,6 +284,10 @@ class WarehousePaths:
     @property
     def amount_review(self) -> Path:
         return self.root / "amount_review"
+
+    @property
+    def member_quarantine(self) -> Path:
+        return self.root / "quarantine_member"
 
 
 @dataclass(frozen=True)
@@ -554,6 +592,22 @@ def _apply_quality_rules(
     return ok, bad
 
 
+def _split_member_missing(
+    orders: DataFrame, dim_member: DataFrame
+) -> tuple[DataFrame, DataFrame]:
+    """⑧ 會員對不到下單日當時的版本（member_sk 為 NULL）→ 隔離（member_missing）。
+
+    和 V6（產品對不到落 -1、訂單照寫）刻意不同：使用者定「在訂單重要度之後是會員資料
+    如果有未知會員資料在做客戶分析是一件困難的事 所以要有錯誤提醒修正data pipline」。
+    〔防護性設計：本資料 0 筆〕
+    """
+    missing = F.col("member_sk").isNull()
+    bad = member_missing_reason(orders.filter(missing), dim_member, "_order_date")
+    return orders.filter(~missing), _quarantine_rows(
+        bad, Category.MEMBER_MISSING, F.col("_member_reason")
+    )
+
+
 def _check_reference(name: str, rejected: DataFrame) -> None:
     sample = rejected.limit(3).collect()
     if sample:
@@ -636,9 +690,11 @@ def transform_order_batch(
     ok, q_fx = _convert_currency(ok, fx)  # ⑥
     ok, q_quality = _apply_quality_rules(ok, as_of)  # ⑦
 
-    # ⑧ 對維度
+    # ⑧ 對維度：產品對不到落 -1、訂單照寫（V6）；會員對不到版本進隔離表
     ok = resolve_product_sk(ok, dim_product)
-    ok = resolve_member_sk(ok, dim_member, "_order_date")
+    ok, q_member = _split_member_missing(
+        resolve_member_sk(ok, dim_member, "_order_date"), dim_member
+    )
     fact = ok.withColumns(
         {
             "order_date_sk": date_sk(F.col("_order_date")),
@@ -658,6 +714,7 @@ def transform_order_batch(
         .unionByName(q_state)
         .unionByName(q_fx)
         .unionByName(q_quality)
+        .unionByName(q_member)
         .withColumn(BATCH_ID_COL, F.lit(batch_id))
         .select(*QUARANTINE_COLUMNS)
     )
@@ -734,7 +791,13 @@ def load_order_batch(
         # 統一成 ReferenceDataError：呼叫端只需要處理一種參考資料錯誤。
         # build_dim_product 在 MERGE 之前就檢查，所以丟出時任何表都還沒寫入
         raise ReferenceDataError(f"products 不能使用，整批停下：{e}") from e
-    member = write_dim_member(spark, source.members(), paths.dim_member, through=as_of)
+    member = write_dim_member(
+        spark,
+        source.members(),
+        paths.dim_member,
+        through=as_of,
+        quarantine_path=paths.member_quarantine,
+    )
 
     existing = _fact_before_batch(spark, paths, batch_id)
     t = transform_order_batch(
@@ -770,7 +833,6 @@ def load_order_batch(
     }
     stats = fact.agg(
         F.sum((F.col("product_sk") == UNKNOWN_PRODUCT_SK).cast("int")).alias("p"),
-        F.sum((F.col("member_sk") == UNKNOWN_MEMBER_SK).cast("int")).alias("m"),
         F.sum(F.col(STATE_SKIPPED_COL).cast("int")).alias("skip"),
         F.sum(F.col(_COUPON_NULLED).cast("int")).alias("coupon"),
     ).first()
@@ -785,6 +847,7 @@ def load_order_batch(
         keys=["order_id"],
         update_condition=FACT_UPDATE_CONDITION,
         commit_marker=_commit_marker(batch_id),
+        check_constraints=FACT_CHECK_CONSTRAINTS,
     )
 
     table = spark.read.format("delta").load(str(paths.fact_order))
@@ -801,7 +864,7 @@ def load_order_batch(
         amount_twd_sum=_sum(fact, "amount_twd"),
         net_amount_twd_sum=_sum(fact, "net_amount_twd"),
         unknown_product_rows=stats["p"] or 0,
-        unknown_member_rows=stats["m"] or 0,
+        unknown_member_rows=by_cat.get(Category.MEMBER_MISSING, 0),
         fact_table_rows=table.count(),
         fact_table_amount_twd_sum=_sum(table, "amount_twd"),
         fact_table_net_amount_twd_sum=_sum(table, "net_amount_twd"),
@@ -869,6 +932,49 @@ def run_batch(
         force_log_path=paths.batch_force_log,
         run=run,
         force=force,
+    )
+
+
+# 排除金額人工確認清單後的金額總和（V2，使用者定 B1）：fact 照原樣保留清單（amount_review）
+# 上的訂單；下游在人工確認前要排除清單上的所有訂單（不論 review_reasons 是哪一種）。使用者
+# 理由：「因為已經有前面指標進入隔離我認為就應該人工審查後在進入下流」。
+# 範圍照實描述：fact 所有狀態（含 cancelled）、折扣前的 amount_twd。這不是「營收」的定義：
+# 營收要不要算取消單、用折扣前或後，由下游語意層決定（Part C）。
+# 清單依批次 replaceWhere，同一張單可能在多批出現，所以先 DISTINCT 再 anti join。
+AMOUNT_EXCLUDING_REVIEW_SQL = """
+SELECT
+  SUM(f.amount_twd) AS amount_twd_total,
+  SUM(CASE WHEN r.order_id IS NULL THEN f.amount_twd END) AS amount_twd_excluding_review,
+  COUNT(r.order_id) AS review_orders
+FROM delta.`{fact_order}` AS f
+LEFT JOIN (SELECT DISTINCT order_id FROM delta.`{amount_review}`) AS r
+  ON f.order_id = r.order_id
+"""
+
+
+@dataclass(frozen=True)
+class AmountTotals:
+    amount_twd_total: Decimal  # fact 全部訂單（所有狀態）的 amount_twd 總和
+    amount_twd_excluding_review: Decimal  # 同上，排除 amount_review 清單上的訂單
+    review_orders: int  # fact 中在清單上的訂單數
+
+
+def amount_totals(spark: SparkSession, paths: WarehousePaths) -> AmountTotals:
+    """跑 AMOUNT_EXCLUDING_REVIEW_SQL（和 README、model.md 附的查詢是同一段）。
+
+    回傳 fact 的 amount_twd 總和（所有狀態、折扣前），以及排除金額人工確認清單後的總和。
+    不是營收的定義，見 AMOUNT_EXCLUDING_REVIEW_SQL 上方說明。
+    """
+    r = spark.sql(
+        AMOUNT_EXCLUDING_REVIEW_SQL.format(
+            fact_order=paths.fact_order, amount_review=paths.amount_review
+        )
+    ).first()
+    zero = Decimal("0.00")
+    return AmountTotals(
+        amount_twd_total=r["amount_twd_total"] or zero,
+        amount_twd_excluding_review=r["amount_twd_excluding_review"] or zero,
+        review_orders=r["review_orders"],
     )
 
 

@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from pipeline.batch_log import BatchRun
-from pipeline.fact_order import WarehousePaths, run_batch
+from pipeline.fact_order import WarehousePaths, amount_totals, run_batch
 from pipeline.session import build_spark
 from pipeline.sources import DEFAULT_DATASET_DIR, INCREMENTAL_DAYS, CsvSource
 
@@ -35,7 +35,8 @@ def format_run(run: BatchRun) -> str:
             f"  隔離分類：{cats or '無'}",
             (
                 f"  跳過中間狀態 {c.skipped_intermediate_rows:,}；product -1："
-                f"{c.unknown_product_rows:,}；member -1：{c.unknown_member_rows:,}"
+                f"{c.unknown_product_rows:,}；會員對不到（已隔離）："
+                f"{c.unknown_member_rows:,}；會員快照違規列 {c.member_rejected_rows:,}"
             ),
             (
                 f"  coupon -1.0 轉 NULL {c.coupon_nulled_rows:,}；"
@@ -80,6 +81,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"資料目錄 {args.data_dir} → 輸出 {paths.root}")
         for day in (None, *INCREMENTAL_DAYS):
             print(format_run(run_batch(spark, source, paths, day, force=args.force)))
+        totals = amount_totals(spark, paths)
+        print(
+            f"fact amount_twd 總和（所有狀態、折扣前）{totals.amount_twd_total:,}；"
+            f"排除金額人工確認清單上 {totals.review_orders:,} 張後 "
+            f"{totals.amount_twd_excluding_review:,}"
+        )
     finally:
         spark.stop()
     return 0

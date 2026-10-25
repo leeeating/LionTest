@@ -9,7 +9,13 @@ from __future__ import annotations
 import pytest
 import reference_model as ref
 from pipeline.batch_log import BatchOrderError
-from pipeline.fact_order import WarehousePaths, run_all, run_batch
+from pipeline.fact_order import (
+    AmountTotals,
+    WarehousePaths,
+    amount_totals,
+    run_all,
+    run_batch,
+)
 from pyspark.sql import functions as F
 
 pytestmark = pytest.mark.slow
@@ -71,6 +77,16 @@ def test_incremental_fact_table_matches_reference(spark, full_run, reference):
     assert got == exp
     # E12：order_id 唯一
     assert len(rows) == fact.select("order_id").distinct().count()
+
+
+def test_incremental_amount_totals_exclude_amount_review(spark, full_run, reference):
+    # V2（使用者定 B1）：fact 保留清單上的訂單，排除清單後的總和不含它們
+    paths, _ = full_run
+    expected, _ = reference
+    got = amount_totals(spark, paths)
+    assert got == AmountTotals(**expected["amount_totals"])
+    assert got.review_orders == 40
+    assert got.amount_twd_excluding_review < got.amount_twd_total
 
 
 def test_incremental_l4_late_paid_does_not_revert_cancelled(spark, full_run):

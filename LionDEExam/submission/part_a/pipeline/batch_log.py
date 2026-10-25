@@ -97,8 +97,11 @@ class SourceChangedError(RuntimeError):
 class BatchCounts:
     """一批的對帳數字。input_rows＝fact_rows＋quarantined_rows＋skipped_rows。
 
-    - fact_rows、amount_twd_sum、unknown_*_rows：這批寫進（MERGE 進）fact 的列；
-      unknown_* 是 product_sk、member_sk 落到 -1 的筆數。
+    - fact_rows、amount_twd_sum、unknown_product_rows：這批寫進（MERGE 進）fact 的列；
+      unknown_product_rows 是 product_sk 落到 -1 的筆數。
+    - unknown_member_rows：會員對不到下單日當時的版本、因此進隔離表（member_missing）
+      的筆數，已含在 quarantined_rows 內。會員對不到不落 -1（使用者定），fact 裡不會有
+      對不到會員的列。〔防護性設計：本資料 0 筆〕
     - quarantined_rows、quarantined_by_category：需要人看的隔離列（依 reject_category）。
     - skipped_rows：略過的列（late_event：晚到但走得到 fact 現況）。這些列也存在隔離表，
       但不是錯誤，所以和 quarantined 分開計數。
