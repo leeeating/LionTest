@@ -2,7 +2,7 @@
 
 用 PySpark＋Delta 建立星型模型（fact_order、dim_member、dim_product、dim_date），先載入 `orders_base`，再依序處理三個每日增量檔，重跑結果必須一致。
 
-> 施工中：模型說明（`model.md`）與資料品質報告（`data-quality-report.md`）的數字仍以 base 為準，T7 更新。
+> 本檔、模型說明（`model.md`）與資料品質報告（`data-quality-report.md`）的數字，都是 base → day3 四批跑完的結果；各段輸出以該段標示的執行日期與 commit 為準（§7 冪等證明已於 2026-10-25 以 9f9d415 重跑確認，結論與各表 hash 不變）。
 
 ## 目錄
 
@@ -39,8 +39,8 @@
 | 共用設定、來源讀取、dim_date、dim_product（T3） | 完成（獨立驗收通過） |
 | dim_member SCD2（T4） | 完成（獨立驗收通過） |
 | fact_order 初始載入、隔離表、對帳（T5） | 完成（獨立驗收通過） |
-| 增量處理與冪等證明（T6） | 完成（待獨立驗收） |
-| 文件（T7） | 本檔撰寫中 |
+| 增量處理與冪等證明（T6） | 完成（獨立驗收通過，見 `notes/part_a/t6-review-findings.md`） |
+| 文件（T7） | 本檔、`model.md`、`data-quality-report.md` 已更新到四批跑完的現況；資料品質報告的修正待重新獨立驗收 |
 
 ## 2. 怎麼跑
 
@@ -163,7 +163,7 @@ SparkSession 固定 `spark.sql.session.timeZone=Asia/Taipei`。下單時間有�
 - **A-3 品質問題的處理**（使用者定案，見 process-log）：
   - V1 負數金額：合約擋下，進隔離表（`contract`）。
   - V3 coupon -1.0：代表「未知」，轉成 NULL，訂單照常寫入；轉了幾筆記在對帳（`coupon_nulled_rows`）。
-  - V2 疑似多乘 1,000：照原樣寫入 fact，另外列進人工確認清單 `amount_review`（Delta 表，依 batch_id replaceWhere）。判斷用比值 `amount_twd ÷（產品定價 × 數量）`：正常列落在 0.84～1.29，比值大於 100 的列入清單。fact 的 amount_twd 總和包含這些列（base 約多 28%，見資料品質報告），所以下游在人工確認前要排除清單上的訂單（見「排除待確認清單後的金額總和」）。產品落到 -1 時沒有定價，算不出比值，不列入。
+  - V2 疑似多乘 1,000：照原樣寫入 fact，另外列進人工確認清單 `amount_review`（Delta 表，依 batch_id replaceWhere）。判斷用比值 `amount_twd ÷（產品定價 × 數量）`：正常列落在 0.84～1.29，比值大於 100 的列入清單。fact 的 amount_twd 總和包含這些列（這 40 列約佔 base 金額總和的 28%，見資料品質報告），所以下游在人工確認前要排除清單上的訂單（見「排除待確認清單後的金額總和」）。產品落到 -1 時沒有定價，算不出比值，不列入。
   - coupon 大於 amount_twd（net_amount_twd 為負）：照原樣寫入 fact，同樣列進 `amount_review`（使用者定 B：「太大的可能是全額折抵」）。清單每張單一列，`review_reasons` 記命中的原因，兩種都中時兩個都列。〔防護性設計：本資料 0 筆〕
   - coupon 為 -1 以外的負數：合約擋下，進隔離表（`contract`）。〔防護性設計：本資料 0 筆〕
   - completed 但出發日未到等：只記錄，照原樣寫入。
@@ -243,7 +243,7 @@ spark.sql(AMOUNT_EXCLUDING_REVIEW_SQL.format(fact_order='<out>/fact_order', amou
 | 差額（清單上訂單的 amount_twd） | 10,102,491,689.70 |
 
 ## 5. 星型模型
-見 [`model.md`](model.md)：模型圖、各表粒度與欄位、dim_member SCD2 規則、fact 怎麼接維度、金額換算、已知限制。數字是 base 載入後量的，三個增量檔處理完後會更新。
+見 [`model.md`](model.md)：模型圖、各表粒度與欄位、dim_member SCD2 規則、fact 怎麼接維度、金額換算、已知限制。數字是 base → day3 四批跑完的結果；欄位與 SCD2 的例子另有註明量測時點。
 
 ## 6. 增量處理策略
 
@@ -331,7 +331,7 @@ spark.sql(AMOUNT_EXCLUDING_REVIEW_SQL.format(fact_order='<out>/fact_order', amou
 1. **強制重跑**：跑完 base → day3 後，每個增量檔用 `force=True` 再實際跑一次（不被批次紀錄跳過），和第一次的結果比。對帳數字不比「寫入當下的整表欄位」（`fact_table_*`）：在 day3 之後重跑 day1，整表本來就比第一次跑 day1 時大。
 2. **中途當掉**：另一個倉儲跑完 base → day2，接著處理 day3：第一次在隔離表已寫、MERGE fact 之前當掉；重跑又在 MERGE fact 之後、寫批次紀錄之前當掉；第三次正常完成。每個時點都確認沒有 day3 的批次紀錄，最後和沒當掉的倉儲比。
 
-輸出（本機，2026-10-24）：
+輸出（本機，2026-10-24；2026-10-25 以 HEAD 9f9d415 重跑，結論「全部相同」、各表 hash 與下列一致）：
 
 **實驗 1：每個增量檔強制重跑一次（force=True，實際執行）**
 
@@ -359,7 +359,7 @@ spark.sql(AMOUNT_EXCLUDING_REVIEW_SQL.format(fact_order='<out>/fact_order', amou
 平常的重跑則由批次紀錄直接跳過，不會重新執行（`tests/test_fact_order_incremental.py` 的 `test_incremental_run_all_again_skips_every_batch`）。
 
 ## 8. 資料品質報告
-見 [`data-quality-report.md`](data-quality-report.md)（撰寫中）：每個問題的描述、影響筆數、偵測查詢與輸出、處理決策與理由。查詢腳本在 `profiling/data_quality_queries.py`。
+見 [`data-quality-report.md`](data-quality-report.md)：每個問題的描述、影響筆數、偵測查詢與輸出、處理決策與理由。查詢腳本在 `profiling/data_quality_queries.py`。
 
 ## 9. 已知限制
 - **schema 變動後需重建倉儲**：沒有做 schema 遷移。例如批次紀錄新增 `reference_sha256`、金額人工確認清單新增三欄之後，用舊版程式建好的倉儲不能直接接著跑（MERGE、replaceWhere 會因 schema 不符失敗），要刪掉輸出目錄重跑。拿掉「未知會員」列之後也一樣：舊倉儲的 dim_member 還留著 -1 那列（MERGE 不刪列），要重建。
@@ -369,7 +369,7 @@ spark.sql(AMOUNT_EXCLUDING_REVIEW_SQL.format(fact_order='<out>/fact_order', amou
 
 - **重跑依賴 Delta time travel，有保存期限**：當掉後重跑、`--force` 重跑都要讀「這批開始之前」的 fact 版本。對 fact 執行 VACUUM 後，舊版本的資料檔被刪掉，這時重跑會直接報錯（不會默默算錯）；超過 Delta log 的保存期限（`delta.logRetentionDuration`，預設 30 天）後，舊版本也讀不到。正式環境要讓重跑的時間窗短於保存期限，或在 VACUUM 前確認沒有待重跑的批次。
 - **`--force` 不比對來源 checksum**：一般重跑時，已完成的批次來源被改過會報錯；`--force` 則直接用目前的來源檔重跑並覆寫這批的結果，不檢查來源是否被改過。只在確定要重算時使用。覆寫會留在強制重跑紀錄 `batch_log_force`（舊／新 sha256；中途當掉也有 `started` 那一列），但被覆寫前的對帳數字不另存，要看舊數字得用 Delta time travel 讀 `batch_log` 的舊版本。
-- **讀取層比 Spark 直接轉型慢**：為了不讓髒值被悄悄改掉，所有欄位先讀成字串，再由 `cast_to_contract()` 逐列檢查。實測 200 萬列（8 核本機，量測時有其他程式同時執行）：直接轉型的讀法 `count()` 0.64 秒、讀全部欄位 3.55 秒；目前的讀法兩者都約 31 秒。時間花在 regex 檢查與轉型，而且合格、隔離兩邊各算一次。本題 10 萬列約多 2 秒，可以忽略；正式環境到數千萬列時會是瓶頸（線性外推，未實測）。可行的優化方向是檢查只算一次並 persist、合併 regex，目前沒做，效果也未驗證。
+- **讀取層比 Spark 直接轉型慢**：為了不讓髒值被悄悄改掉，所有欄位先讀成字串，再由 `cast_to_contract()` 逐列檢查，時間花在 regex 檢查與轉型。改之前合格、隔離兩邊各算一次：實測 200 萬列（8 核本機，量測時有其他程式同時執行），直接轉型的讀法 `count()` 0.64 秒、讀全部欄位 3.55 秒，當時的讀法兩者都約 31 秒。commit 92b8d85 改成每列的違規原因只算一次（`localCheckpoint`）再拆成合格與隔離：`cast_to_contract` 單獨實測快 2.2～2.8 倍，整個 base 批次快 20～30%（3 次，見 `notes/part_a/t6-review-findings.md`）；200 萬列沒有在改之後重量。仍比直接轉型慢，本題 10 萬列影響可以忽略；正式環境到數千萬列時可能是瓶頸（未實測）。合併 regex 是另一個可行的優化方向，目前沒做，效果也未驗證。
 
 ## 10. 相關決策
 - `decisions/ADR-01`～`ADR-04`（皆已定案）：

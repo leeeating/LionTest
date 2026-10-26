@@ -501,7 +501,7 @@ ADR-05 定案時的機制是「在 commit 標上 `batch:<id>`，重跑時找這�
 
 T6 針對性驗收指出：`net_amount_twd = amount_twd − coupon_discount` 在 coupon 大於金額時會變負數，-1 以外的負 coupon 則會讓 net 比原價高；程式沒有處理，文件也沒寫。本資料 0 筆，屬於防護性設計。AI 列出三個選項：A 只寫進已知限制；B 負的 coupon（-1 以外）在合約層擋下，coupon 大於金額時照寫但列進 `amount_review` 清單；C 兩種都進隔離表。AI 建議 B。使用者選 B，理由：「負數coupon沒有合理解釋，太大的可能是全額折抵」。
 
-- 依據：`notes/part_a/t6-review-findings.md`（針對性驗收的第一個低嚴重度問題）；實作待派
+- 依據：`notes/part_a/t6-review-findings.md`（針對性驗收的第一個低嚴重度問題）；實作：commit 92b8d85
 
 ### 2026-10-19｜Part A｜匯率表壞一列就整批停
 
@@ -515,13 +515,13 @@ T5 實作者自行把「產品清單壞列就整批停」的規則延伸到匯�
 
 使用者把商品和會員分開處理：商品可能隨時間下架消失，所以 V6 保留訂單、落 -1；會員是客戶分析的主體，對不到就代表管線或上游有錯，要用隔離表提醒修正。
 
-- 依據：A-3 報告第五節；實作待派
+- 依據：A-3 報告第五節；實作：commit 9f9d415
 
 ### 2026-10-19｜Part A｜會員快照的違規列：另開會員隔離表
 
 T5 實作者原本讓 dim_member 的違規列（等級不在清單、註冊日晚於快照日等）只計數，不進任何隔離表。這項沒有使用者定案。本資料 0 筆，屬於防護性設計。AI 列出三個選項：A 只計數；B 另開會員隔離表（原始字串＋原因＋batch_id）；C 放進訂單隔離表。AI 建議 B。使用者問「這個DE角度怎麼處理」，AI 說明兩種業界做法：每個來源各一張隔離表（Databricks quarantine），或共用一張錯誤事件表（Kimball error event table）；並說明主檔慣例是壞列不蓋掉上一個好版本，以及連鎖效應：會員第一次出現就壞掉時，他的訂單會依前一個定案進訂單隔離表。使用者選 B，理由：「根據DE的慣例」。
 
-- 依據：`notes/part_a/t5-review-findings.md`「實作者自己加或自己決定」；實作待派
+- 依據：`notes/part_a/t5-review-findings.md`「實作者自己加或自己決定」；實作：commit 9f9d415
 
 ### 2026-10-19｜Part A｜A-3 報告改成以表格與欄位為中心
 
@@ -533,7 +533,7 @@ A-3 報告原本依問題編號（V1、L3…）分節。使用者提出：「我
 
 ADR-02 的後果留了一個未決項：「要不要加 Delta CHECK，T5 寫入 fact_order 時再決定」，T5 沒有決定。AI 列出三個選項：A 不加；B 只加在關鍵欄位（例如 `amount > 0`、`order_status IN (...)`、`member_sk IS NOT NULL`）；C 所有合約規則都加。AI 建議 B。使用者問「為什麼是用delta去實現 不能是在python中嗎」，AI 說明 Python 合約層已經在做驗證，但只擋得住走管線的寫入；CHECK 存在表本身，連 notebook 直接寫入、手動 SQL `UPDATE` 都擋得住，類比 OLTP 的後端驗證加上資料庫約束。使用者選 B，理由：「Delta CHECK 是最後一道防線，擋得住繞過管線的寫入」。
 
-- 依據：`decisions/ADR-02-source-abstraction-schema-contract.md`「後果」；實作待派
+- 依據：`decisions/ADR-02-source-abstraction-schema-contract.md`「後果」；實作：commit 9f9d415
 
 ### 2026-10-19｜Part A｜A-3 報告與 HTML 改成依管線步驟閱讀
 
@@ -569,7 +569,7 @@ A-3 主管版的結論第一句「要先排除 40 張金額多了 1,000 倍的�
 
 AI 再指出 B 有兩種落實方式：B1 留在 fact、正式營收指標排除 `amount_review` 清單上的訂單；B2 改成進隔離表，會推翻原本「照原樣寫入」的決定，fact 從 99,950 變成 99,910。使用者確認目前 40 張會寫進 fact 之後，選 B1。
 
-- 依據：`part_a/data-quality-report.md`（結論句待改）；實作待派（README／model.md 補正式營收的定義與查詢）
+- 依據：`part_a/data-quality-report.md` 結論段；實作：commit 9f9d415（`amount_totals()`）
 
 ### 2026-10-24｜Part A｜共用業務假設文件；AI 誤稱官方沒寫 coupon 幣別
 
@@ -583,4 +583,32 @@ AI 的錯：`notes/part_a/schema-inference/coupon-currency.md` 寫「官方 READ
 
 為了落實 V2 的 B1（正式營收排除 `amount_review` 清單），實作 agent 寫了一條「正式營收」查詢，並先用「fact 所有狀態、折扣前 amount_twd」當口徑，再把「已取消算不算、折扣前或後」丟回來給使用者決定。使用者反問：「為什麼part a需要決策 營收要不要算已取消的訂單、用折扣前還是折扣後」。AI 承認這是指標定義、屬於語意層，是 AI 這邊把它帶進 Part A；建議 Part A 的文件與查詢不叫「營收」，改成照實描述欄位與範圍（例如「fact 的 amount_twd 總和，含所有狀態、折扣前」），營收的定義移到 Part C 的語意層題目一起決定。使用者回「照這樣改」。
 
-- 依據：實作待修（README、model.md、`fact_order.py` 的 `REVENUE_SQL` 命名與說明、A-3 報告用詞）；Part C 待辦加入營收定義
+- 依據：用詞修正在 commit 9f9d415（`AMOUNT_EXCLUDING_REVIEW_SQL`、`amount_totals()`）與 A-3 收尾；Part C 待辦見 `.claude/work/part-c.md`
+
+### 2026-10-26｜Part A｜A-3 報告收尾：實作狀態、用詞與 Spark 查詢輸出
+
+管線在 92b8d85、9f9d415 完成所有定案後，A-3 報告收尾：「已決定，程式尚未完成」改成實際狀態並附 commit；「營收」改成照實描述的範圍（訂單金額總和，折扣前、含所有狀態），並寫明營收由下游語意層定義；結論第一句依 V2 的 B1 定案改寫，附排除前後兩個數字；coupon 幣別改標官方說明；提到業務假設的地方連到 `business-assumptions.md`；Spark 的 P- 查詢改成配合現在的管線並重跑，輸出收進附錄 B。
+
+AI 的錯：收尾 agent 第一次跑 P- 段時，用 `member_sk < 0` 找「未知會員」列，得到 4,436 列。`member_sk` 是 xxhash64，本來就可能是負數，這個檢查本身是錯的；改成 `member_sk = -1 OR member_id IS NULL` 後是 0。發現者：收尾 agent 自查。另外 P- 段跑出「城市為空值的會員 65 位」，比報告原寫的 61 位多，agent 新增 `Q-V9.na_before_real` 查證多出的 4 位是「先 N/A、後來才有真實城市」的會員，報告改引這條查詢。
+
+- 依據：`part_a/data-quality-report.md`、`part_a/profiling/data_quality_queries.py`（未 commit，待驗收）
+
+## 第四部分：進階模組 F
+
+模組 F（特徵管線除錯）的診斷、修正設計與防再犯機制。
+
+### 2026-10-26｜模組 F｜AI 先審、使用者再判斷；AI 沒有主動落檔
+
+AI 先整理需求並提出六步計畫，建議由使用者先自己讀程式碼列懷疑清單，再派獨立 agent 盲審比對，理由是避免使用者被 AI 的答案帶著走。使用者選了另一個順序：「你先幫我審查我在判斷」。AI 讀完程式碼，用 3 個資料查詢佐證，寫出初稿：主因是三個 target encoding 特徵把自己的標籤算進去，其中 `member_product_cancel_rate` 在 95.9% 的列等於標籤；另外是先算特徵再隨機切分。AUC 沒有實測，因為 `.venv` 沒有 scikit-learn。
+
+AI 的不足：計畫與審查初稿都只放在對話裡，沒有寫進工作檔、notes 或 process-log，違反專案「每個產出都要能追溯」的規則。發現者：使用者（「你有把步驟跟報告記錄下來嗎」）。補寫了 `notes/module_f/ai-review-draft.md`（附查詢與輸出）與工作檔。
+
+- 依據：`notes/module_f/ai-review-draft.md`〔待 commit〕
+
+### 2026-10-26｜Part A｜A-3 驗收修正：model.md 更新到現況、主管追問的答案；「高估將近三成」算錯基準
+
+A-3 定稿候選的 read-back 驗收（有條件過）指出：一起繳交的 `model.md` 還停在只跑過 base 的舊狀態，和報告直接矛盾；`business-assumptions.md` 3.7 還寫「正式營收」；正文殘留「語意層」，「使用者的理由」主管會讀成終端客戶；README 有過時敘述。驗收者也扮演主管，提出三個正文沒回答的追問。修正 agent 全面更新 model.md（T7 的主體），並用資料回答可計算的部分：擋下的撞號若是真訂單約 1,800 張、468,895,127.27 台幣；40 張若除以 1,000 修正，5～6 月約 25,877,084,322.08；6 月金額只在 7/2 多了 60 張、約 +0.07%。「由誰確認、多久確認完」「月報何時結」「撞號要不要向上游確認」是營運流程問題，留給使用者。
+
+AI 的錯：報告 §2.1 寫「不排除的話營收會高估將近三成」，README 寫「base 約多 28%」。28.09% 是 40 張在照原樣總額裡的佔比，不是高估幅度；以除以 1,000 修正後的金額為基準，照原樣其實高估約 39%。這句從 A-3 白話改寫時就存在，主對話在對使用者說明 V2 時也重複了「高估約 28%」「高估將近三成」，前兩輪驗收都沒抓到。發現者：第二輪針對性驗收 agent 重算時發現。
+
+- 依據：`part_a/data-quality-report.md`、`part_a/model.md`、`part_a/README.md`、`business-assumptions.md`（未 commit，修正中）
