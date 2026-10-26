@@ -62,4 +62,10 @@ spark.sql("SELECT order_status, count(*) FROM fact_order GROUP BY order_status")
 - Part B 的 `buggy_pipeline.py` 假設在 Fabric Lakehouse 執行
 
 ## 官方文件
-未證實：本筆記依 AI 的既有知識整理，這次沒有實際打開官方文件核對。之後要引用時，先查 Microsoft Learn 的 Fabric 文件（learn.microsoft.com/fabric）。
+2026-10-19 Part C 查證（研究 subagent 只查 learn.microsoft.com），完整清單與原文見 `notes/part_c/fabric-facts.md`（編號 F1～F10）。對照本筆記上面的內容：
+- **Mirroring 支援自架 SQL Server**：2016–2022 用 CDC、2025 用 change feed；防火牆後才需要 gateway；產出是 Delta 表加唯讀 SQL endpoint（F9-1～F9-4）。GA 公告在官方部落格，Learn 頁面只是沒標 Preview
+- **Lakehouse 的 SQL endpoint 是唯讀**，寫入要用 Spark；要用 T-SQL 寫入、多表交易才需要 Warehouse（F4-1、F4-4）
+- **Eventstream＋CDC**：Eventstream 的 CDC 連接器列的是 Azure SQL 與「SQL Server on VM」，一般自家機房的 SQL Server 能不能接沒有查證（fabric-facts「未查到」第 8 條）
+- **Eventstream 傳遞保證是 at-least-once**，沒有內建去重；去重要在 Eventhouse 用 materialized view（F1-11、F2-8、F2-9）
+- **Fabric data agent 目前不支援非英文**，回應最多 25 列 × 25 欄（F7-8）
+- 上面「主要元件」「怎麼接自家的 MSSQL」兩節仍是查證前的整理，與 fabric-facts 衝突時以 fabric-facts 為準
