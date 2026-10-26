@@ -798,7 +798,7 @@ AI 只提供骨架（選 F 的理由、不選 D 的理由、不選 E 的理由�
 
 製作 agent 產出 `module_x/diagrams.html`，README 3.1、4.4 各加一行連結。驗收 agent 結論為有條件過：圖 2 的座標與「留／不留」判斷全部正確，但有 4 處文字少了限定語，或把示意寫得像事實，例如「真實會員 M000175 的五筆訂單」（該會員實際有 15 筆）、「同一組通常是第一次出現」（是從這份資料推廣出的通則）。AI 已修正這 4 處，並把「下單之前」改成「下單當天以前」。發現者：驗收 agent。
 
-- 依據：`module_x/diagrams.html`、`CLAUDE.md`〔待 commit〕
+- 依據：`module_x/diagrams.html`、`CLAUDE.md`（5b767cf）
 
 ### 2026-10-26｜模組 F｜存活分析擴寫成小節；HTML 改成有排版的完整報告
 
@@ -806,7 +806,7 @@ AI 只提供骨架（選 F 的理由、不選 D 的理由、不選 E 的理由�
 
 AI 的錯：兩次把「HTML」理解成換格式，沒有先查 repo 既有的 HTML 慣例。發現者：使用者。
 
-- 依據：`module_x/README.md`、`module_x/report.html`〔待 commit〕
+- 依據：`module_x/README.md`、`module_x/report.html`（5b767cf）
 
 ### 2026-10-26｜模組 F｜圖解報告驗收；不用「分鏡」稱呼
 
@@ -821,4 +821,4 @@ AI 的錯：兩次把「HTML」理解成換格式，沒有先查 repo 既有的 
 
 驗收期間，使用者說：「不要用分境去稱呼」。report.html 與 README 連結裡的「分鏡／第 N 鏡」全部改成「頁／第 N 頁」，用「頁」而不用「節」，是為了避免和 README 的章節編號混淆。圖 1、圖 2 已併入 report.html，使用者決定刪除 `diagrams.html`（「刪除」），report.html 裡指向它的連結一併移除。
 
-- 依據：`module_x/report.html`、`module_x/README.md` 4.8〔待 commit〕
+- 依據：`module_x/report.html`、`module_x/README.md` 4.8（5b767cf）
