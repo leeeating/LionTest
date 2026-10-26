@@ -440,37 +440,37 @@ body.playing .player{display:flex;position:fixed;bottom:12px;left:50%;transform:
 <section class="scene" id="s4" aria-labelledby="h4">
   <header><span class="no">04</span><h2 id="h4">我先定下的業務規則</h2></header>
   <p class="narr"><b>題目和官方說明沒交代的業務前提，我先定成明確的規則，處理流程的每個判斷都照這些規則走。</b>下面挑出 8 條最關鍵的：上半是“我假設了什麼”，藍底是“因此流程怎麼處理”。紅框的兩條和資料或官方說法不一致，是主管最該知道的。</p>
-  <div class="legend"><span><span class="tag t-me">作者假設</span> 作者自己的判斷</span><span><span class="tag t-off">官方說明</span> 官方資料說明已寫明，不算假設</span><span><span class="tag t-ai">AI 提出、作者採用</span></span><span><span class="tag t-tbd">⚠ 和資料或官方不一致</span></span></div>
+  <div class="legend"><span><span class="tag t-me">我的假設</span> 我自己的判斷</span><span><span class="tag t-off">官方說明</span> 官方資料說明已寫明，不算假設</span><span><span class="tag t-ai">AI 提出、我採用</span></span><span><span class="tag t-tbd">⚠ 和資料或官方不一致</span></span></div>
   <div class="rules">
-    <div class="rule"><div class="as"><span class="num">1</span>訂單狀態只會往前走，取消後不能恢復 <span class="tag t-me">作者假設</span></div>
+    <div class="rule"><div class="as"><span class="num">1</span>訂單狀態只會往前走，取消後不能恢復 <span class="tag t-me">我的假設</span></div>
       <div class="to">以資料裡記錄的更新時間判斷新舊；狀態往回走就擋下；晚到的較舊狀態不採用（第 12 鏡）。</div>
-      <blockquote class="quote">「那先簡單假設不能恢復」</blockquote></div>
-    <div class="rule"><div class="as"><span class="num">2</span>已完成之後不能再取消 <span class="tag t-me">作者假設</span></div>
+      <blockquote class="quote">先採用最簡單的前提：訂單取消後就不能恢復。</blockquote></div>
+    <div class="rule"><div class="as"><span class="num">2</span>已完成之後不能再取消 <span class="tag t-me">我的假設</span></div>
       <div class="to">“已完成 → 已取消”視為不合法、擋下待查（本資料 0 筆，預先防範）。</div>
-      <blockquote class="quote">「先假設completed後不能取消」</blockquote></div>
-    <div class="rule conflict"><div class="as"><span class="num">3</span>“已完成”代表已經出團 <span class="tag t-me">作者假設</span></div>
+      <blockquote class="quote">先假設訂單一旦已完成，就不能再取消。</blockquote></div>
+    <div class="rule conflict"><div class="as"><span class="num">3</span>“已完成”代表已經出團 <span class="tag t-me">我的假設</span></div>
       <div class="warn">⚠ 和資料衝突：28,578 張在出發前就標成已完成（第 10 鏡）</div>
       <div class="to">已完成是訂單的最後一步，第 2 條建立在這上面；衝突的訂單照原樣寫入，只在報告記錄。</div>
-      <blockquote class="quote">「completed先假設成出團完成」；「先把狀態規則定下來 之後比較好處理」</blockquote></div>
-    <div class="rule conflict"><div class="as"><span class="num">4</span>訂單的會員、下單時間、金額不能被修改，只有狀態會變 <span class="tag t-me">作者假設</span></div>
+      <blockquote class="quote">先假設“已完成”代表出團完成；先把狀態規則定下來，之後比較好處理。</blockquote></div>
+    <div class="rule conflict"><div class="as"><span class="num">4</span>訂單的會員、下單時間、金額不能被修改，只有狀態會變 <span class="tag t-me">我的假設</span></div>
       <div class="warn">⚠ 和官方說法不同：官方說更新檔含舊訂單的狀態更新（第 9 鏡）</div>
       <div class="to">同編號但這三項不同的資料是撞號，擋下待查，不覆蓋原本的訂單。</div>
-      <blockquote class="quote">「訂單的基本資訊不能被修改」</blockquote></div>
-    <div class="rule"><div class="as"><span class="num">5</span>沒標時區的時間是台北時間 <span class="tag t-me">作者假設</span></div>
+      <blockquote class="quote">訂單的基本資訊不能被修改。</blockquote></div>
+    <div class="rule"><div class="as"><span class="num">5</span>沒標時區的時間是台北時間 <span class="tag t-me">我的假設</span></div>
       <div class="to">下單日、換匯日、會員等級對應，一律用台北日期。</div>
-      <blockquote class="quote">「台北 因為重複列跟時間先後都對得上」</blockquote></div>
-    <div class="rule"><div class="as"><span class="num">6</span>訂單金額是折扣前的金額 <span class="tag t-me">作者假設</span></div>
+      <blockquote class="quote">沒標時區的時間當成台北時間，因為這樣解讀，重複送來的資料和時間先後都對得上。</blockquote></div>
+    <div class="rule"><div class="as"><span class="num">6</span>訂單金額是折扣前的金額 <span class="tag t-me">我的假設</span></div>
       <div class="to">另外算出折扣後金額，兩種都存；資料本身分辨不出來，所以先定義清楚。</div>
-      <blockquote class="quote">「那折扣前」；「我的設計傾向紀錄所有金額」</blockquote></div>
+      <blockquote class="quote">金額定義為折扣前；我的設計傾向把所有金額都記錄下來。</blockquote></div>
     <div class="rule"><div class="as"><span class="num">7</span>折扣金額是台幣 <span class="tag t-off">官方說明</span></div>
-      <div class="to">折扣不換匯，直接從台幣金額扣掉。官方欄位說明已寫明，作者另外用資料確認過。</div>
-      <blockquote class="quote">「coupon 當 TWD，三種幣別面額一樣」<span class="who">作者用資料確認時的話</span></blockquote></div>
-    <div class="rule"><div class="as"><span class="num">8</span>同一位會員同一天兩筆，以較高等級為準 <span class="tag t-me">作者假設</span></div>
+      <div class="to">折扣不換匯，直接從台幣金額扣掉。官方欄位說明已寫明，我另外用資料確認過。</div>
+      <blockquote class="quote">折扣當成台幣，因為不同幣別訂單的折扣面額都一樣。<span class="who">我用資料確認時的判斷</span></blockquote></div>
+    <div class="rule"><div class="as"><span class="num">8</span>同一位會員同一天兩筆，以較高等級為準 <span class="tag t-me">我的假設</span></div>
       <div class="to">30 位會員的第一個版本取較高等級。證據薄弱，影響只有這 30 位。</div>
-      <blockquote class="quote">「假設會員系統也是同樣的行為才選擇的行為」</blockquote></div>
+      <blockquote class="quote">假設會員系統遇到這種情況也是取較高等級，所以選擇這樣處理。</blockquote></div>
   </div>
-  <p class="sub">其他規則見業務假設全文，例如“幣別寫成 NTD 就是台幣”是 <span class="tag t-ai">AI 提出、作者採用</span>，“產品下架了訂單仍要保留”“每張訂單都要對得到會員”是作者假設。</p>
-  <p class="src">技術細節：<a href="../business-assumptions.md">業務假設</a> 1.1、1.2、1.4、2.1、3.1、3.8、4.1、5.1 節，以及第 8 節“和資料衝突、面談最可能被追問的假設”</p>
+  <p class="sub">其他規則見業務假設全文，例如“幣別寫成 NTD 就是台幣”是 <span class="tag t-ai">AI 提出、我採用</span>，“產品下架了訂單仍要保留”“每張訂單都要對得到會員”是我的假設。</p>
+  <p class="src">技術細節：<a href="../business-assumptions.md">業務假設</a> 1.1、1.2、1.4、2.1、3.1、3.8、4.1、5.1 節，以及第 8 節“和資料衝突、面談最可能被追問的假設”；各節附逐字紀錄</p>
 </section>
 
 <!-- ============ 05 ============ -->
@@ -651,8 +651,8 @@ body.playing .player{display:flex;position:fixed;bottom:12px;left:50%;transform:
   <div class="decide">
     <h3>怎麼處理</h3>
     <p><span class="tag t-keep">照原樣保留＋人工確認清單</span> 不自動改金額；列進人工確認清單等人看過。<b>人工確認之前，這 40 張不計入下游的金額指標。</b></p>
-    <blockquote class="quote">「沒辦法系統性的處理 金額問題我判斷成case by case」<span class="who">作者原話：為什麼不自動除以 1,000</span></blockquote>
-    <blockquote class="quote">「因為已經有前面指標進入隔離我認為就應該人工審查後在進入下流」<span class="who">作者原話：為什麼確認前先不計入金額指標（“隔離”在這裡指列進人工確認清單、人工確認前不計入金額指標；訂單本身仍保留在資料表）</span></blockquote>
+    <blockquote class="quote">金額問題無法用一套規則系統性處理，我判斷要逐筆確認。<span class="who">我的判斷：為什麼不自動除以 1,000</span></blockquote>
+    <blockquote class="quote">這 40 張已經被前面的檢查標記出來，所以應該人工審查後再進入下游。<span class="who">我的判斷：為什麼確認前先不計入金額指標（訂單本身仍保留在資料表）</span></blockquote>
   </div>
   <p class="src">技術細節：A-3 第 2.1 節、附錄 C-1、附錄 D 的 C-1 兩列</p>
 </section>
@@ -687,7 +687,7 @@ body.playing .player{display:flex;position:fixed;bottom:12px;left:50%;transform:
     <h3>怎麼處理</h3>
     <p><span class="tag t-block">擋下待查</span> 判定為撞號，存進待查清單，不覆蓋原本的訂單。擋下的資料保留原樣，規則改變時可以重新處理。</p>
     <p class="sub">代價：如果擋下的其實是真的新訂單，是 1,800 張、468,895,127.27 台幣，約佔三天後金額總和的 1.20%。</p>
-    <blockquote class="quote">「把撞號當 noise 處理」；「訂單的基本資訊不能被修改」<span class="who">作者原話（noise＝雜訊；基本資訊指會員、下單時間、金額，狀態可以變）</span></blockquote>
+    <blockquote class="quote">把撞號當成雜訊處理；訂單的基本資訊不能被修改。<span class="who">我的判斷（基本資訊指會員、下單時間、金額，狀態可以變）</span></blockquote>
   </div>
   <p class="src">技術細節：A-3 第 2.2 節、附錄 C-2；ADR-03 撞號當雜訊處理</p>
 </section>
@@ -726,7 +726,7 @@ body.playing .player{display:flex;position:fixed;bottom:12px;left:50%;transform:
   <div class="decide">
     <h3>怎麼處理</h3>
     <p><span class="tag t-log">照原樣寫入，只記錄</span> 如果把“已完成”當成“已出團”去算出團金額或完成率，數字都不成立；這 28,578 張的金額是 10,324,629,272.48 台幣。<b>看報表時要知道：本資料的已完成不代表已出團。</b></p>
-    <blockquote class="quote">「completed先假設成出團完成」；「先把狀態規則定下來 之後比較好處理」<span class="who">作者原話（completed＝已完成）</span></blockquote>
+    <blockquote class="quote">先假設“已完成”代表出團完成；先把狀態規則定下來，之後比較好處理。<span class="who">我的判斷</span></blockquote>
   </div>
   <p class="src">技術細節：A-3 第 2.3 節、附錄 C-3 與“C-3 的基準說明”（已付款、已建立兩個數字的範圍是總檔每張單取最新一筆）</p>
 </section>
@@ -750,7 +750,7 @@ body.playing .player{display:flex;position:fixed;bottom:12px;left:50%;transform:
   <div class="decide">
     <h3>怎麼處理</h3>
     <p><span class="tag t-block">一進來就擋下</span> 資料一進來就檢查，不合格的不收；這 50 張存進待查清單，不寫進資料表。</p>
-    <p class="sub">判斷理由（白話轉述）：負數金額在資料一進來檢查時就該擋下。逐字原話見 A-3 附錄 D 的 C-4。</p>
+    <p class="sub">我的判斷：負數金額在資料一進來檢查時就該擋下。判斷的出處見 A-3 附錄 D 的 C-4。</p>
   </div>
   <p class="src">技術細節：A-3 第 2.4 節、附錄 C-4、附錄 F“① 讀取”的幣別分布</p>
 </section>
@@ -798,7 +798,7 @@ body.playing .player{display:flex;position:fixed;bottom:12px;left:50%;transform:
     <div class="decide">
       <h3>怎麼處理</h3>
       <p><span class="tag t-skip">不採用</span> 以資料裡記錄的更新時間判斷新舊；較舊的那筆不採用（原樣留存備查），訂單維持已取消。符合“訂單狀態只會往前走”的假設。</p>
-      <blockquote class="quote">「晚到事件不該當成狀態轉移」<span class="who">作者原話</span></blockquote>
+      <blockquote class="quote">晚到的舊事件不該被當成狀態改變。<span class="who">我的判斷</span></blockquote>
     </div>
   </div>
   <p class="sub">為什麼 7/1 的檔會有 07-04 的事件：更新檔裡的資料時間常常晚於檔名日期（每天約七成，最多晚 4 天，見第 14 鏡），所以判斷新舊只看資料裡記錄的時間。</p>
@@ -902,32 +902,31 @@ body.playing .player{display:flex;position:fixed;bottom:12px;left:50%;transform:
     <div class="tile"><span class="zero">0 筆</span><div class="when">跳過中間狀態（已建立直接到已完成）</div><span class="tag t-keep">照常寫入</span> 只計數</div>
     <div class="tile"><span class="zero">—</span><div class="when">有人繞過處理流程直接寫入</div><span class="tag t-block">資料表最後一道檢查</span> 也擋得住</div>
   </div>
-  <blockquote class="quote">「晚一點進來比錯的資料好」；「匯率影響的是訂單金額 這個程度比較大 需要事先停止」<span class="who">作者原話：為什麼參考資料一有壞資料就整批暫停</span></blockquote>
+  <blockquote class="quote">資料晚一點進來，也比進來錯的資料好；匯率直接影響訂單金額，影響程度較大，所以要事先停下來。<span class="who">我的判斷：為什麼參考資料一有壞資料就整批暫停</span></blockquote>
   <p class="src">技術細節：A-3 第 5 節、附錄 E 防護性設計清單（上面挑 12 項代表，完整 21 項含最後一道檢查）</p>
 </section>
 
 <!-- ============ 16 ============ -->
 <section class="scene" id="s16" aria-labelledby="h16">
   <header><span class="no">16</span><h2 id="h16">我的判斷原則</h2></header>
-  <p class="narr"><b>上面每一個處理方式，背後都是這五條原則之一。</b>每條附上我在討論中說的原話（逐字，出自 AI 協作紀錄）。</p>
+  <p class="narr"><b>上面每一個處理方式，背後都是這五條原則之一。</b>每條附上我當時的判斷（整理成書面語；逐字紀錄與出處見 A-3 附錄 D）。</p>
   <div class="prin">
     <div class="tile"><h3><span class="num">1</span>資料不夠時，不讓系統自己猜</h3>
-      <blockquote class="quote">「資料不足時不要讓管線自己猜」</blockquote>
+      <blockquote class="quote">資料不足時，不要讓處理流程自己猜。</blockquote>
       <p class="sub">例：同一秒兩種狀態、找不到匯率 → 擋下，不拿前一天的匯率；折扣寫 -1 → 不猜折扣值。</p></div>
     <div class="tile"><h3><span class="num">2</span>寧可晚一點，也不要錯的資料</h3>
-      <blockquote class="quote">「晚一點進來比錯的資料好」</blockquote>
+      <blockquote class="quote">資料晚一點進來，也比進來錯的資料好。</blockquote>
       <p class="sub">例：產品清單、匯率表有壞資料 → 整批暫停；40 張異常金額 → 人工確認前不計入金額指標。</p></div>
     <div class="tile"><h3><span class="num">3</span>只記錄確定知道的事</h3>
-      <blockquote class="quote">「只記錄確定知道的事」</blockquote>
       <p class="sub">例：會員新等級從“看到變化的那次匯出日”起算，不猜實際升級日。</p></div>
     <div class="tile"><h3><span class="num">4</span>不確定的值，不能蓋掉確定的值</h3>
-      <blockquote class="quote">「假值不能蓋真值」；「訂單的基本資訊不能被修改」</blockquote>
+      <blockquote class="quote">代表“不知道”的假值，不能蓋掉真實的值；訂單的基本資訊不能被修改。</blockquote>
       <p class="sub">例：N/A、1900-01-01 不蓋掉真實城市與生日；撞號的資料不覆蓋原本的訂單。</p></div>
     <div class="tile"><h3><span class="num">5</span>不是每個問題都要處理，但都要記下來</h3>
-      <blockquote class="quote">「有些問題可以只記錄下來 不需要特別處理」</blockquote>
+      <blockquote class="quote">有些問題記錄下來就好，不需要特別處理。</blockquote>
       <p class="sub">例：出發前就標已完成、產品已下架、同名不同編號 → 照原樣寫入，在報告裡說明。</p></div>
   </div>
-  <p class="src">技術細節：A-3 附錄 D 決策與原話對照（每條原話的出處是 ai-collab/process-log.md 的事件標題）</p>
+  <p class="src">技術細節：<a href="data-quality-report.md#附錄-d決策與原話對照">A-3 附錄 D 決策與原話對照</a>（逐字紀錄與出處）</p>
 </section>
 
 <!-- ============ 17 ============ -->
