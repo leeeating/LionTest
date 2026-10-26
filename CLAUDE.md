@@ -11,7 +11,7 @@ LionTest/                              git repo 根目錄
 └── LionDEExam/
     ├── 01_考題卷_資料工程師TakeHome.md  題目（唯讀）
     ├── candidate_package/             原始素材（唯讀）
-    └── submission/                    所有繳交物，一律 Markdown
+    └── submission/                    所有繳交物，一律 Markdown；圖解可附自包含 HTML 當輔助
         ├── README.md                  交付索引
         ├── part_a/  part_b/  part_c/  module_x/
         ├── notes/                     理解問題時的筆記（分層、多檔）

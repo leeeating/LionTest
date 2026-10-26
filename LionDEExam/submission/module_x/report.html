@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var t=localStorage.getItem("modf-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
+<title>模組 F 圖解報告：訂單取消預測的特徵管線除錯</title>
+<!--
+  數字來源：一律取自 LionDEExam/submission/module_x/README.md（正文與附錄）。
+  合成資料上的數字一律標「在這份資料上」；圖的刻度只標 0.5（README 2.2：0.5 等於亂猜），其餘是座標不是資料。
+  長條長度依 README 數字等比例畫（AUC 長條以 0.5 為起點），長度本身不顯示在畫面上。
+  第 5、13 頁的圖 1、圖 2 原樣取自已驗收的圖解初版，只改樣式與深色模式配色；
+  圖 1 的訂單編號與會員編號是從資料挑出的示例，不在 README 正文中。
+-->
+<style>
+:root{
+  color-scheme: light;
+  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#6f6d68;
+  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,0.10);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s7:#6250d6;
+  --s1-soft:#cde2fb; --s2-soft:#fbe0d4; --s3-soft:#d2f1e5;
+  --crit:#d03b3b; --good:#0ca30c; --goodtext:#006300;
+  --card:#ffffff;
+  /* 圖解用：錯誤＝紅＋斜線、正確＝藍＋圓點、灰＝不納入 */
+  --leak:#c62f2f; --leak-soft:#fbe3e3; --leak-str:#eba3a3;
+  --okc:#2a78d6; --ok-soft:#dbe9fb; --ok-dot:#8db8e8;
+  --gry:#9aa0a6; --gry-soft:#efeee9; --gry-line:#c9c8bf;
+}
+/* 主題：預設跟隨系統；data-theme="light"/"dark" 是使用者手動選的（存在 localStorage） */
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#a3a19a;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s7:#9085e9;
+    --s1-soft:#1c3352; --s2-soft:#4a2617; --s3-soft:#13392b;
+    --crit:#e66767; --good:#0ca30c; --goodtext:#0ca30c;
+    --card:#232322;
+    --leak:#ef7b7b; --leak-soft:#3d1d1d; --leak-str:#7a3535;
+    --okc:#6aa8f0; --ok-soft:#1c3352; --ok-dot:#2c4f7a;
+    --gry:#8b8a85; --gry-soft:#262624; --gry-line:#4a4a46;
+  }
+}
+:root[data-theme="dark"]{
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#a3a19a;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s7:#9085e9;
+    --s1-soft:#1c3352; --s2-soft:#4a2617; --s3-soft:#13392b;
+    --crit:#e66767; --good:#0ca30c; --goodtext:#0ca30c;
+    --card:#232322;
+    --leak:#ef7b7b; --leak-soft:#3d1d1d; --leak-str:#7a3535;
+    --okc:#6aa8f0; --ok-soft:#1c3352; --ok-dot:#2c4f7a;
+    --gry:#8b8a85; --gry-soft:#262624; --gry-line:#4a4a46;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--page);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI","PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  line-height:1.65;font-size:16px}
+a{color:var(--s1)}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 20px 80px}
+header.top h1{font-size:1.7rem;margin:.2em 0 .1em;line-height:1.3}
+header.top p{color:var(--ink2);margin:.3em 0}
+.tabnum{font-variant-numeric:tabular-nums}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86em;background:var(--grid);border-radius:4px;padding:0 4px;overflow-wrap:anywhere}
+
+/* 目錄 */
+nav.toc{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:14px 18px;margin:18px 0 8px}
+nav.toc h2{font-size:1rem;margin:0 0 6px}
+nav.toc ol{margin:0;padding:0;list-style:none;columns:2;column-gap:28px}
+nav.toc li{break-inside:avoid;padding:2px 0;font-size:.95rem}
+nav.toc .n{display:inline-block;min-width:2.2em;color:var(--muted);font-variant-numeric:tabular-nums}
+nav.toc .grp{color:var(--muted);font-size:.8rem;margin-top:6px}
+@media (max-width:640px){nav.toc ol{columns:1}}
+
+.playbar{display:none;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap}
+.js .playbar{display:flex}
+button{font:inherit;cursor:pointer;border:1px solid var(--ring);background:var(--surface);color:var(--ink);border-radius:8px;padding:6px 14px}
+button.primary{background:var(--s1);color:#fff;border-color:transparent}
+.hint{color:var(--muted);font-size:.85rem}
+
+/* 頁面卡 */
+.scene{background:var(--surface);border:1px solid var(--ring);border-radius:16px;padding:26px 28px 18px;margin:26px 0;
+  display:flex;flex-direction:column;gap:14px;scroll-margin-top:12px}
+.scene > header{display:flex;gap:14px;align-items:baseline}
+.scene .no{font-size:.85rem;font-weight:700;color:#fff;background:var(--ink2);border-radius:6px;padding:2px 8px;font-variant-numeric:tabular-nums;flex:none}
+.scene h2{font-size:1.35rem;margin:0;line-height:1.35}
+.narr{font-size:1.02rem;color:var(--ink);margin:0;max-width:52em}
+.narr b{font-weight:700}
+.src{margin-top:auto;padding-top:8px;border-top:1px dashed var(--grid);font-size:.78rem;color:var(--muted)}
+.src a{color:var(--muted)}
+.fig{margin:0}
+.fig figcaption{font-size:.85rem;color:var(--ink2);margin-top:6px}
+.sub{font-size:.88rem;color:var(--ink2)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.cols3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.cols4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.cols > *, .cols3 > *, .cols4 > *, figure{min-width:0}
+@media (max-width:760px){.cols,.cols3{grid-template-columns:1fr}.cols4{grid-template-columns:1fr 1fr}.scene{padding:20px 16px 14px}}
+@media (max-width:480px){.cols4{grid-template-columns:1fr}}
+
+/* 卡片、數字磚 */
+.tile{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:14px 16px}
+.tile .big{font-size:2rem;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}
+.tile .mid{font-size:1.4rem;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums}
+.tile .lbl{font-size:.9rem;color:var(--ink2)}
+.tile h3{margin:0 0 4px;font-size:1rem}
+.tile p{margin:.3em 0;font-size:.92rem}
+.tile.bad{border:2px solid var(--crit)}
+.tile.good{border:2px dashed var(--s1)}
+.tile .on{font-size:.75rem;color:var(--muted);display:block;margin-bottom:2px}
+.cols4 .tile{padding:10px 12px;font-size:.85rem}
+.tag{display:inline-block;font-size:.75rem;font-weight:600;border-radius:999px;padding:1px 9px;white-space:nowrap;border:1px solid transparent}
+.t-main{background:var(--s2-soft);color:var(--ink);border-color:var(--s2)}
+.t-minor{background:transparent;color:var(--ink2);border-color:var(--axis)}
+.t-ok{background:var(--s1-soft);color:var(--ink);border-color:var(--s1)}
+.t-no{background:transparent;color:var(--crit);border-color:var(--crit)}
+.t-me{background:transparent;color:var(--ink2);border-color:var(--axis)}
+.t-ai{background:transparent;color:var(--s7);border-color:var(--s7)}
+
+/* 長條（CSS 畫） */
+.bars{display:flex;flex-direction:column;gap:10px}
+.brow{display:grid;grid-template-columns:11em 1fr;gap:10px;align-items:center}
+.brow .k{font-size:.9rem;text-align:right;color:var(--ink2)}
+.track{position:relative;height:24px;display:flex;gap:2px;align-items:stretch}
+.seg{height:100%;min-width:3px}
+.seg:last-child{border-radius:0 4px 4px 0}
+.c1{background:var(--s1)} .c2{background:var(--s2)} .c3{background:var(--s3)} .cg{background:var(--axis)}
+.bval{font-size:.85rem;font-variant-numeric:tabular-nums;white-space:nowrap;padding-left:6px;align-self:center;color:var(--ink)}
+@media (max-width:560px){.brow{grid-template-columns:1fr}.brow .k{text-align:left}}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:.85rem;color:var(--ink2)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+
+table{border-collapse:collapse;font-size:.88rem;width:100%}
+th{white-space:nowrap}
+th,td{border-bottom:1px solid var(--grid);padding:5px 8px;text-align:left;vertical-align:top}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.tscroll{overflow-x:auto}
+
+/* 流程 */
+.flow{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.flow li{display:grid;grid-template-columns:3.2em 1fr auto;gap:10px;align-items:center;background:var(--card);border:1px solid var(--ring);border-radius:10px;padding:8px 12px;position:relative;margin-bottom:14px}
+.flow li::after{content:"";position:absolute;left:1.95em;bottom:-14px;height:14px;border-left:2px solid var(--axis)}
+.flow li:last-child::after{display:none}
+.flow .st{font-weight:700;font-size:.9rem;color:var(--ink2);text-align:center}
+.flow .nm{font-weight:600}
+.flow .ds{font-size:.85rem;color:var(--ink2)}
+.flow .out{text-align:right;font-size:.82rem}
+.flow li.pre{background:transparent;border-style:dashed}
+.flow li.hot{border-color:var(--crit);border-width:2px}
+@media (max-width:560px){.flow li{grid-template-columns:2.6em 1fr}.flow .out{grid-column:2;text-align:left}}
+
+.quote{border-left:3px solid var(--s7);padding:4px 12px;margin:0;color:var(--ink);font-size:.95rem}
+.quote .who{display:block;color:var(--muted);font-size:.8rem}
+
+.grpcard{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:12px 14px}
+.grpcard h3{margin:0 0 6px;font-size:1rem}
+.grpcard ul{list-style:none;margin:0;padding:0}
+.grpcard li{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:6px 0;border-top:1px solid var(--grid);font-size:.88rem}
+.grpcard li:first-child{border-top:none}
+.grpcard .how{grid-column:1 / -1;color:var(--ink2);font-size:.82rem}
+
+.prin{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.prin .tile h3{font-size:1.05rem}
+.prin .num{display:inline-block;width:1.6em;height:1.6em;border-radius:50%;background:var(--s7);color:#fff;text-align:center;font-weight:700;line-height:1.6em;margin-right:6px;font-size:.85rem}
+
+/* 管道：一列方塊加箭頭（第 12、16 頁） */
+.pipe{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+.pipe .bx{flex:1 1 0;min-width:120px;background:var(--card);border:1px solid var(--ring);border-radius:10px;padding:8px 10px;font-size:.88rem}
+.pipe .bx b{display:block}
+.pipe .ar{flex:none;align-self:center;padding:0 6px;color:var(--muted);font-size:1.2rem}
+.pipe .bx.bad{border:2px solid var(--crit)}
+.pipe .bx.good{border:2px dashed var(--s1)}
+.pipe .bx.hl{background:var(--s1-soft)}
+.rowlbl{font-weight:700;font-size:.92rem;margin:4px 0 6px}
+@media (max-width:640px){.pipe{flex-direction:column}.pipe .ar{transform:rotate(90deg);text-align:center}}
+.formula{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--s1-soft);border-radius:8px;padding:8px 12px;font-size:.92rem;overflow-x:auto;white-space:nowrap}
+
+/* 自繪 SVG（依主題變色） */
+svg{display:block;width:100%;height:auto;font-family:inherit}
+svg.ui text{fill:var(--ink);font-size:13px}
+svg.ui .mut{fill:var(--muted)}
+svg.ui .ink2{fill:var(--ink2)}
+svg.ui .tok{fill:var(--okc);font-weight:700}
+svg.ui .tleak{fill:var(--leak);font-weight:700}
+svg.ui .b{font-weight:700}
+svg.ui .ax{stroke:var(--ink);stroke-width:1.5}
+svg.ui .grid{stroke:var(--grid);stroke-width:1}
+svg.ui .use{stroke:var(--okc);stroke-width:5}
+svg.ui .drop{stroke:var(--gry);stroke-width:5;stroke-dasharray:8 4}
+svg.ui .fok{fill:var(--okc)} svg.ui .fgry{fill:var(--gry)} svg.ui .fleak{fill:var(--leak)} svg.ui .fs2{fill:var(--s2)}
+svg.ui .sok{stroke:var(--okc)} svg.ui .sgry{stroke:var(--gry)} svg.ui .sleak{stroke:var(--leak)} svg.ui .sink{stroke:var(--ink)}
+svg.ui .hollow{fill:var(--surface);stroke:var(--okc);stroke-width:2.5}
+svg.ui .hollow2{fill:var(--surface);stroke:var(--s2);stroke-width:2.5}
+svg.ui .frame-gry{fill:none;stroke:var(--gry);stroke-width:1.5}
+svg.ui .frame-ok{fill:none;stroke:var(--okc);stroke-width:2;stroke-dasharray:6 3}
+svg.ui .frame-leak{fill:none;stroke:var(--leak);stroke-width:2}
+svg.ui .bgsurf{fill:var(--surface)}
+svg.ui .p-fbg{fill:var(--gry-soft)} svg.ui .p-fln{stroke:var(--gry-line)}
+svg.ui .p-hbg{fill:var(--leak-soft)} svg.ui .p-hst{fill:var(--leak-str)}
+svg.ui .p-dbg{fill:var(--ok-soft)} svg.ui .p-ddot{fill:var(--ok-dot)}
+.hscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.hscroll svg{min-width:640px}
+
+/* ===== 圖 1、圖 2：內容原樣，以下只改樣式（.dg 範圍內）===== */
+.dg{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:12px 16px;font-size:.92rem;line-height:1.55}
+.dg .dgt{font-weight:700;font-size:1.02rem;margin:4px 0 2px}
+.dg .dgs{font-weight:700;font-size:.96rem;margin:16px 0 2px}
+.dg .ref{font-size:.8rem;color:var(--muted);font-weight:normal;margin-left:.5em}
+.dg .caption{color:var(--ink2);font-size:.88rem;margin:.3em 0 .8em}
+.dg .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.82rem;margin:0 0 8px;padding-bottom:8px;border-bottom:1px dashed var(--grid)}
+.dg .legend span{display:inline-flex;align-items:center;gap:6px}
+.dg .sw{display:inline-block;width:26px;height:14px;border:2px solid;border-radius:2px;margin:0}
+.dg .sw[style]{border-color:var(--gry) !important;background:var(--gry-soft) !important}
+.dg .pat-leak{border-color:var(--leak);background:repeating-linear-gradient(45deg,var(--leak-soft) 0 4px,var(--leak-str) 4px 6px)}
+.dg .pat-ok{border-color:var(--okc);background-color:var(--ok-soft);background-image:radial-gradient(var(--ok-dot) 1.2px,transparent 1.4px);background-size:6px 6px}
+.dg .tag{font-size:.72rem;font-weight:700;border-radius:999px;padding:0 8px;border:1.5px solid;background:transparent;white-space:nowrap}
+.dg .tag.leak{color:var(--leak);border-color:var(--leak)}
+.dg .tag.ok{color:var(--okc);border-color:var(--okc);border-style:dashed}
+.dg .steps{display:grid;grid-template-columns:1.25fr 22px 1fr 22px 1.35fr;align-items:start;gap:6px}
+.dg .step-title{font-weight:700;font-size:.9rem;margin-bottom:6px}
+.dg .arrow{align-self:center;text-align:center;font-size:24px;color:var(--muted)}
+.dg table{font-size:.78rem}
+.dg th,.dg td{border:1px solid var(--grid);padding:3px 5px;text-align:center}
+.dg th{background:var(--page);white-space:normal}
+.dg tr.g1 td:first-child{border-left:5px solid var(--ink2)}
+.dg tr.g2 td:first-child{border-left:5px double var(--ink2)}
+.dg tr.g3 td:first-child{border-left:5px dotted var(--ink2)}
+.dg td.own{outline:2.5px solid var(--leak);outline-offset:-3px;font-weight:700;color:var(--leak)}
+.dg td.leakcell{color:var(--leak);font-weight:700}
+.dg td.leakcell.eq{background:repeating-linear-gradient(45deg,var(--leak-soft) 0 4px,var(--leak-str) 4px 6px)}
+.dg td.okcell{color:var(--okc);text-align:left;background-color:var(--ok-soft);background-image:radial-gradient(var(--ok-dot) 1px,transparent 1.2px);background-size:6px 6px}
+.dg .group-box{border:1px solid var(--ring);border-radius:8px;padding:6px 8px;margin-bottom:8px;font-size:.8rem;background:var(--surface)}
+.dg .group-box .hd{font-weight:700}
+.dg .chip{display:inline-block;border:1.5px solid var(--leak);color:var(--leak);border-radius:10px;padding:0 7px;margin:2px;font-size:.9em}
+.dg .calc{margin-top:3px}
+.dg .calc b{color:var(--leak)}
+.dg .compare{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.dg .panel{border:2px solid;border-radius:10px;padding:10px 12px;background:var(--surface)}
+.dg .panel.leak{border-color:var(--leak)}
+.dg .panel.ok{border-color:var(--okc);border-style:dashed}
+.dg .panel h4{margin:0 0 6px;font-size:.95rem}
+.dg .panel.leak h4{color:var(--leak)}
+.dg .panel.ok h4{color:var(--okc)}
+.dg .note{font-size:.8rem;color:var(--muted);border-left:3px solid var(--grid);padding-left:8px;margin-top:8px}
+.dg .online{margin-top:12px;border:1px solid var(--ring);border-radius:8px;padding:8px 12px;font-size:.88rem;background:var(--surface)}
+.dg .svgwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.dg .svgwrap svg{min-width:640px}
+/* SVG 內寫死的顏色改成跟主題走（屬性選擇器覆蓋 presentation attribute，不動圖的內容） */
+.dg svg{fill:var(--ink)}
+.dg svg text{font-family:inherit}
+.dg [fill="#1f2328"]{fill:var(--ink)}       .dg [stroke="#1f2328"]{stroke:var(--ink)}
+.dg [fill="#57606a"],.dg [fill="#6b7075"]{fill:var(--muted)}
+.dg [fill="#b42318"]{fill:var(--leak)}      .dg [stroke="#b42318"]{stroke:var(--leak)}
+.dg [fill="#1f5f8b"]{fill:var(--okc)}       .dg [stroke="#1f5f8b"]{stroke:var(--okc)}
+.dg [fill="#9aa0a6"]{fill:var(--gry)}       .dg [stroke="#9aa0a6"]{stroke:var(--gry)}
+.dg [fill="#fdecea"]{fill:var(--leak-soft)} .dg [fill="#e8988f"]{fill:var(--leak-str)}
+.dg [fill="#e6f0f7"]{fill:var(--ok-soft)}   .dg [fill="#7fa9c8"]{fill:var(--ok-dot)}
+.dg [fill="#f2f3f4"]{fill:var(--gry-soft)}  .dg [stroke="#c4c8cc"]{stroke:var(--gry-line)}
+.dg [stroke="#d0d7de"]{stroke:var(--grid)}
+.dg text[fill="#fff"]{fill:var(--surface)}
+@media (max-width:760px){.dg .steps,.dg .compare{grid-template-columns:1fr}.dg .arrow{transform:rotate(90deg)}}
+
+/* 主題切換（需要 JavaScript；沒有 JavaScript 時不顯示，跟隨系統） */
+.theme{display:none;gap:0;border:1px solid var(--ring);border-radius:8px;overflow:hidden}
+.js .theme{display:inline-flex}
+.theme button{border:none;border-radius:0;padding:6px 10px;font-size:.85rem;background:var(--surface);color:var(--ink2)}
+.theme button + button{border-left:1px solid var(--ring)}
+.theme button[aria-pressed="true"]{background:var(--ink);color:var(--surface);font-weight:600}
+.playbar .theme{margin-left:auto}
+/* 播放模式（需要 JavaScript；沒有 JavaScript 時是一般捲動版面） */
+body.playing{overflow:hidden}
+body.playing header.top, body.playing nav.toc, body.playing .playbar, body.playing footer.end{display:none}
+body.playing .wrap{max-width:none;padding:0}
+body.playing .scene{display:none}
+body.playing .scene.active{display:flex;position:fixed;inset:0;margin:0;border-radius:0;border:none;overflow:auto;padding:4vh 6vw 70px}
+body.playing .scene.active > *{max-width:1100px;width:100%;margin-left:auto;margin-right:auto}
+.player{display:none}
+body.playing .player{display:flex;position:fixed;bottom:12px;left:50%;transform:translateX(-50%);gap:8px;align-items:center;z-index:10;
+  background:var(--surface);border:1px solid var(--ring);border-radius:999px;padding:6px 10px;box-shadow:0 2px 10px rgba(0,0,0,.15)}
+@media (max-width:560px){ body.playing .player{flex-wrap:wrap;justify-content:center;width:calc(100% - 16px);border-radius:16px} body.playing .scene.active{padding-bottom:120px} }
+.player .pos{font-variant-numeric:tabular-nums;color:var(--ink2);font-size:.9rem;min-width:4.5em;text-align:center}
+
+/* 列印：每頁一張，固定淺色 */
+@media print{
+  :root, :root[data-theme]{color-scheme:light;--page:#fff;--surface:#fff;--ink:#000;--ink2:#333;--muted:#555;--card:#fff;
+    --s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s7:#6250d6;--s1-soft:#cde2fb;--s2-soft:#fbe0d4;--s3-soft:#d2f1e5;--grid:#ddd;--axis:#aaa;--crit:#d03b3b;--goodtext:#006300;--ring:rgba(0,0,0,.15);
+    --leak:#c62f2f;--leak-soft:#fbe3e3;--leak-str:#eba3a3;--okc:#2a78d6;--ok-soft:#dbe9fb;--ok-dot:#8db8e8;--gry:#9aa0a6;--gry-soft:#efeee9;--gry-line:#c9c8bf}
+  body{background:#fff;font-size:12px}
+  .wrap{max-width:none;padding:0}
+  .playbar,.player{display:none !important}
+  nav.toc{page-break-after:always;border:none}
+  .scene{page-break-after:always;break-after:page;border:none;margin:0;padding:6mm 4mm}
+  .scene:last-of-type{page-break-after:auto}
+  .hscroll svg,.dg .svgwrap svg{min-width:0}
+  .seg,.tag,.prin .num,.scene .no,.dg,.dg *,.formula,.pipe .bx{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+@media (forced-colors: active){
+  .seg{forced-color-adjust:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <p class="sub">雄獅資訊 資料工程師 Take-Home｜模組 F 圖解報告（給主管）</p>
+  <h1>訂單取消預測：離線 AUC 0.9 以上、上線只剩約 0.55，問題出在哪、怎麼修、怎麼防</h1>
+  <p>這份報告分成 19 頁，一頁一個重點。可以直接往下捲動閱讀；也可以按“播放”一頁一畫面，用鍵盤左右鍵切換。</p>
+  <p class="sub"><b>數字怎麼讀</b>：題目的資料是只有兩個月的合成資料。本報告的主軸是從程式碼就能證明的<b>機制</b>，換資料也成立；畫面上的資料數字一律標“在這份資料上”，只當佐證。完整的查詢與輸出見 <a href="README.md">README</a> 附錄。</p>
+</header>
+
+<div class="playbar">
+  <button class="primary" id="playBtn" type="button">▶ 播放</button>
+  <span class="hint">播放時：← → 切換頁面，Esc 或“離開播放”離開</span>
+  <span class="theme" role="group" aria-label="主題"><button type="button" data-set-theme="auto" aria-pressed="true">跟隨系統</button><button type="button" data-set-theme="light" aria-pressed="false">淺色</button><button type="button" data-set-theme="dark" aria-pressed="false">深色</button></span>
+</div>
+
+<nav class="toc" aria-label="目錄">
+  <h2>目錄（19 頁）</h2>
+  <ol>
+    <li class="grp">開場</li>
+    <li><a href="#s1"><span class="n">01</span>結論一句話</a></li>
+    <li><a href="#s2"><span class="n">02</span>為什麼選模組 F</a></li>
+    <li><a href="#s3"><span class="n">03</span>原本的管線長什麼樣</a></li>
+    <li class="grp">診斷：為什麼離線準、上線不準</li>
+    <li><a href="#s4"><span class="n">04</span>找到的問題一覽</a></li>
+    <li><a href="#s5"><span class="n">05</span>主因：特徵裡算進了自己的答案</a></li>
+    <li><a href="#s6"><span class="n">06</span>其餘三個歷史特徵偷看了未來</a></li>
+    <li><a href="#s7"><span class="n">07</span>評估方式也錯：先算特徵、再隨機切</a></li>
+    <li><a href="#s8"><span class="n">08</span>上線時查不到歷史，被補成 0</a></li>
+    <li><a href="#s9"><span class="n">09</span>上游資料問題與次要問題</a></li>
+    <li class="grp">修正設計</li>
+    <li><a href="#s10"><span class="n">10</span>四條原則</a></li>
+    <li><a href="#s11"><span class="n">11</span>標籤要等結果確定</a></li>
+    <li><a href="#s12"><span class="n">12</span>特徵怎麼重新算</a></li>
+    <li><a href="#s13"><span class="n">13</span>按時間切分、留空檔</a></li>
+    <li><a href="#s14"><span class="n">14</span>每個問題由哪個修法解決</a></li>
+    <li><a href="#s15"><span class="n">15</span>升級方向：存活分析</a></li>
+    <li class="grp">防再犯與限制</li>
+    <li><a href="#s16"><span class="n">16</span>防線一：答案打亂測試</a></li>
+    <li><a href="#s17"><span class="n">17</span>防線二：影子測試與上線監控</a></li>
+    <li><a href="#s18"><span class="n">18</span>兩道防線各擋得住什麼</a></li>
+    <li><a href="#s19"><span class="n">19</span>怎麼驗證的、還有哪些限制</a></li>
+  </ol>
+</nav>
+
+<!-- ============ 01 ============ -->
+<section class="scene" id="s1" aria-labelledby="h1">
+  <header><span class="no">01</span><h2 id="h1">結論一句話</h2></header>
+  <p class="narr"><b>結論：離線分數虛高，是因為特徵本身含有答案；評估方式也錯，把測試集的答案和未來的訂單混進了特徵。上線時這些資訊都不存在，模型因此失效。</b></p>
+  <p class="narr">DS 團隊的訂單取消預測模型，離線測試 AUC 0.9 以上，上線兩週只剩約 0.55，業務端已停用。DS 確認演算法和超參數沒有問題，請資料工程師診斷特徵管線。</p>
+  <figure class="fig">
+    <svg class="ui" viewBox="0 0 860 150" role="img" aria-labelledby="aucT">
+      <title id="aucT">AUC 的尺：0.5 等於亂猜；離線測到 0.9 以上，上線只剩約 0.55，幾乎等於亂猜</title>
+      <!-- 刻度：0.5 在 x=120，每 0.1 = 130px；0.9 → 640，0.55 → 185 -->
+      <line class="ax" x1="120" y1="100" x2="800" y2="100"/>
+      <line class="sink" x1="120" y1="92" x2="120" y2="108" stroke-width="2"/>
+      <text x="120" y="126" text-anchor="middle" class="mut">0.5（亂猜）</text>
+      <text x="790" y="126" text-anchor="end" class="mut">越右邊越準 →</text>
+      <rect x="120" y="30" width="520" height="22" rx="4" class="fleak"/>
+      <text x="650" y="46" class="tleak">離線測試：0.9 以上</text>
+      <rect x="120" y="62" width="65" height="22" rx="4" fill="var(--gry)"/>
+      <text x="195" y="78" class="b">上線兩週：約 0.55</text>
+      <text x="20" y="46" class="ink2">離線</text>
+      <text x="20" y="78" class="ink2">上線</text>
+    </svg>
+    <figcaption>AUC：隨機挑一張取消的單和一張沒取消的單，模型給取消那張較高分的機率。0.5 等於亂猜。</figcaption>
+  </figure>
+  <div class="cols3">
+    <div class="tile"><h3>診斷｜為什麼離線準、上線不準</h3><div class="lbl">三個取消率特徵連同這筆訂單自己的標籤一起算；先算特徵再隨機切分；上線時查不到歷史的特徵被補成 0。→ 第 4～9 頁</div></div>
+    <div class="tile"><h3>修正｜時間點正確</h3><div class="lbl">歷史特徵只用下單之前的訂單，取消率只用其中結果已確定的；標籤等出發日過了才算數；按下單時間整批切分並留空檔。→ 第 10～15 頁</div></div>
+    <div class="tile"><h3>防再犯｜兩道防線</h3><div class="lbl">CI 加“答案打亂測試”擋住特徵含答案；上線前後用影子測試與監控當最後防線。→ 第 16～18 頁</div></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#1-摘要">README 1 摘要</a>、<a href="README.md#21-題目與管線">2.1 題目與管線</a>、<a href="README.md#22-名詞">2.2 名詞</a></p>
+</section>
+
+<!-- ============ 02 ============ -->
+<section class="scene" id="s2" aria-labelledby="h2">
+  <header><span class="no">02</span><h2 id="h2">為什麼選模組 F</h2></header>
+  <p class="narr"><b>選 F，是因為我認為它比較接近 MLE 的工作，而我碩士就是在做設計與改善 ML 模型。</b></p>
+  <div class="cols3">
+    <div class="tile good"><span class="on">第一選擇</span><div class="mid">模組 F</div><p>比較接近 MLE 的工作；我碩士就是在做設計與改善 ML 模型。</p></div>
+    <div class="tile"><span class="on">第二</span><div class="mid">模組 D</div><p>可以接觸到更多軟體上的技術。</p></div>
+    <div class="tile"><span class="on">最後</span><div class="mid">模組 E</div><p>評判可以用最近推出的決策模型 Jev 來幫忙，相關技術也可能在 agent 的發展中被弱化；不過仍是非常值得開發成企業內部 agent 的方向。</p></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#0-模組選擇說明">README 0 模組選擇說明</a></p>
+</section>
+
+<!-- ============ 03 ============ -->
+<section class="scene" id="s3" aria-labelledby="h3">
+  <header><span class="no">03</span><h2 id="h3">原本的管線長什麼樣</h2></header>
+  <p class="narr"><b>管線只有三步：讀訂單、算 8 個特徵、隨機切分後訓練。</b>問題集中在紅框的兩步。</p>
+  <div class="cols">
+    <ol class="flow">
+      <li><span class="st">1</span><div><div class="nm"><code>load_orders</code> 讀訂單</div><div class="ds">讀 <code>orders_base.csv</code>，丟掉金額、下單時間、出發日解析失敗的列。標籤＝狀態是“已取消”。</div></div><span class="out"></span></li>
+      <li class="hot"><span class="st">2</span><div><div class="nm"><code>build_features</code> 算 8 個特徵</div><div class="ds">四個來自統計：會員訂單數、會員取消率、會員 × 產品取消率、產品取消率。四個是訂單本身的欄位：金額、人數、折扣、距出發天數。</div></div><span class="out"><span class="tag t-main">第 5、6 頁</span></span></li>
+      <li class="hot"><span class="st">3</span><div><div class="nm"><code>train</code> 切分、訓練、評估</div><div class="ds">標準化 → 隨機切 75% 訓練、25% 測試 → 邏輯迴歸 → 印出 AUC。</div></div><span class="out"><span class="tag t-main">第 7 頁</span></span></li>
+    </ol>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="tile"><h3>資料洩漏（data leakage）</h3><div class="lbl">訓練或評估時，特徵含有預測當下不可能知道的資訊，例如結果本身，或預測時間點之後才發生的事。</div></div>
+      <div class="tile"><h3>時間點正確（point-in-time）</h3><div class="lbl">每筆訂單的特徵只用“下單那一刻已經知道的事”計算。這是整個修正設計的核心。</div></div>
+      <div class="tile"><h3>本報告的數字從哪來</h3><div class="lbl">環境沒有 scikit-learn，AUC 由另一份獨立審查用 numpy 自寫的邏輯迴歸與 AUC 算出，隨機切分也和原管線不保證逐列相同。所以數字只當佐證，機制才是主軸。</div></div>
+    </div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#21-題目與管線">README 2.1</a>、<a href="README.md#22-名詞">2.2</a>、<a href="README.md#23-數字的適用範圍">2.3 數字的適用範圍</a>、附錄 A 執行環境</p>
+</section>
+
+<!-- ============ 04 ============ -->
+<section class="scene" id="s4" aria-labelledby="h4">
+  <header><span class="no">04</span><h2 id="h4">找到的問題一覽</h2></header>
+  <p class="narr"><b>六個主因分成三類：特徵定義錯、評估方式錯、上線端補值錯；另有兩個次要問題。</b>就算特徵改對，評估方式不改，離線分數仍會高估，所以兩類都要修。</p>
+  <div class="cols">
+    <div class="grpcard"><h3>特徵定義錯：特徵裡有答案或未來</h3><ul>
+      <li><span>會員 × 產品取消率含自己的標籤</span><span class="tag t-main">主因</span><span class="how">組內筆數越少越接近標籤，只有一筆時就等於標籤。→ 第 5 頁</span></li>
+      <li><span>其餘三個歷史特徵用到未來資料</span><span class="tag t-main">主因</span><span class="how">會員取消率、產品取消率、會員訂單數都用整段期間計算。→ 第 6 頁</span></li>
+      <li><span>不在產品清單的產品編號</span><span class="tag t-main">主因</span><span class="how">只有一筆訂單的產品，產品取消率等於標籤；也是上游資料問題。→ 第 9 頁</span></li>
+    </ul></div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="grpcard"><h3>評估方式錯：測試集不再是“沒看過的資料”</h3><ul>
+        <li><span>先算特徵、後切分</span><span class="tag t-main">主因</span><span class="how">→ 第 7 頁</span></li>
+        <li><span>隨機切分，不是按時間切分</span><span class="tag t-main">主因</span><span class="how">→ 第 7 頁</span></li>
+      </ul></div>
+      <div class="grpcard"><h3>上線端：離線看不到的落差</h3><ul>
+        <li><span>上線時查不到歷史的特徵被補成 0</span><span class="tag t-main">主因</span><span class="how">→ 第 8 頁</span></li>
+      </ul></div>
+      <div class="grpcard"><h3>次要</h3><ul>
+        <li><span>標準化在切分前就用了全部資料；重複列</span><span class="tag t-minor">次要</span><span class="how">→ 第 9 頁</span></li>
+      </ul></div>
+    </div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#3-診斷報告">README 3 診斷報告</a>（問題總表）</p>
+</section>
+
+<!-- ============ 05 ============ -->
+<section class="scene" id="s5" aria-labelledby="h5">
+  <header><span class="no">05</span><h2 id="h5">主因：特徵裡算進了自己的答案</h2></header>
+  <p class="narr"><b>“會員 × 產品取消率”是把同一位會員買同一個產品的所有訂單取平均，連這筆訂單自己的答案也算進去。</b>一組只有一筆時，這個特徵就是答案本身；模型等於在抄答案，這也是 DS 看到它“重要性最高”的原因。</p>
+  <figure class="fig dg">
+<div class="legend">
+  <span><i class="sw pat-leak"></i><span class="tag leak">洩漏／錯誤</span> 紅色＋斜線、實線框</span>
+  <span><i class="sw pat-ok"></i><span class="tag ok">正確</span> 藍色＋圓點、虛線框</span>
+  <span><i class="sw" style="border-color:var(--grey);background:#e5e7ea"></i>灰色：被淘汰／不納入</span>
+</div>
+<div class="dgt">圖 1：洩漏機制，groupby 怎麼把自己的答案算進特徵 <span class="ref">對應 README 3.1、4.3</span></div>
+<p class="caption">
+  原管線 <code>build_features</code> 用 <code>df.groupby(["member_id", "product_id"]).agg(member_product_cancel_rate=("label", "mean"))</code> 對全部資料取 label 平均，再 merge 回每一列，所以每筆訂單自己的 label 都在自己的特徵裡。
+  只有一筆的組別，特徵就等於答案；README 3.1 指出，在這份資料上 98.99% 的列上特徵值完全等於標籤。以下用會員 M000175 其中三組（共五筆）訂單示範。
+</p>
+
+<div class="steps">
+  <!-- 步驟 1 -->
+  <div>
+    <div class="step-title">① 分組（member_id × product_id）</div>
+    <table>
+      <tr><th>order_id</th><th>product_id</th><th>order_status</th><th>label</th></tr>
+      <tr class="g1"><td>ORD00071342</td><td>P00006</td><td>cancelled</td><td>1</td></tr>
+      <tr class="g2"><td>ORD00073189</td><td>P00004</td><td>completed</td><td>0</td></tr>
+      <tr class="g3"><td>ORD00022761</td><td>P00199</td><td>completed</td><td>0</td></tr>
+      <tr class="g3"><td>ORD00051213</td><td>P00199</td><td>created</td><td>0</td></tr>
+      <tr class="g3"><td>ORD00001045</td><td>P00199</td><td>cancelled</td><td>1</td></tr>
+    </table>
+    <div class="note">左側框線樣式（實線／雙線／點線）代表同一組。member_id 皆為 M000175。</div>
+  </div>
+  <div class="arrow">&#8594;</div>
+  <!-- 步驟 2 -->
+  <div>
+    <div class="step-title">② 取 label 平均（含每一筆自己）</div>
+    <div class="group-box">
+      <div class="hd">M000175 × P00006（只有一筆）</div>
+      <span class="chip">ORD00071342：1</span>
+      <div class="calc">1 / 1 = <b>1.0</b></div>
+    </div>
+    <div class="group-box">
+      <div class="hd">M000175 × P00004（只有一筆）</div>
+      <span class="chip">ORD00073189：0</span>
+      <div class="calc">0 / 1 = <b>0.0</b></div>
+    </div>
+    <div class="group-box">
+      <div class="hd">M000175 × P00199（三筆）</div>
+      <span class="chip">ORD00022761：0</span>
+      <span class="chip">ORD00051213：0</span>
+      <span class="chip">ORD00001045：1</span>
+      <div class="calc">1 / 3 = <b>0.333</b></div>
+    </div>
+    <div class="note">紅框的 label 全部進了平均，包括之後要被預測的那一筆自己。</div>
+  </div>
+  <div class="arrow">&#8594;</div>
+  <!-- 步驟 3 -->
+  <div>
+    <div class="step-title">③ merge 貼回每一列</div>
+    <table>
+      <tr><th>order_id</th><th>label<br>（答案）</th><th>特徵</th><th></th></tr>
+      <tr class="g1"><td>ORD00071342</td><td class="own">1</td><td class="leakcell eq">1.0</td><td><span class="tag leak">特徵 = 答案</span></td></tr>
+      <tr class="g2"><td>ORD00073189</td><td class="own">0</td><td class="leakcell eq">0.0</td><td><span class="tag leak">特徵 = 答案</span></td></tr>
+      <tr class="g3"><td>ORD00022761</td><td class="own">0</td><td class="leakcell">0.333</td><td><span class="tag leak">含自己</span></td></tr>
+      <tr class="g3"><td>ORD00051213</td><td class="own">0</td><td class="leakcell">0.333</td><td><span class="tag leak">含自己</span></td></tr>
+      <tr class="g3"><td>ORD00001045</td><td class="own">1</td><td class="leakcell">0.333</td><td><span class="tag leak">含自己</span></td></tr>
+    </table>
+    <div class="note">每一列的紅框 label 都是右邊特徵分子的一部分。</div>
+  </div>
+</div>
+
+<div class="compare">
+  <div class="panel leak">
+    <h4>原管線 <span class="tag leak">洩漏</span></h4>
+    <ul style="margin:0;padding-left:1.2em;font-size:.9em">
+      <li>用<b>全部資料</b>計算，包含自己與之後才下的單。</li>
+      <li>P00006、P00004 只有一筆：特徵 1.0、0.0 就是自己的 label。</li>
+      <li>P00199 三筆共用 0.333，每一筆的分子都含自己的 label。</li>
+    </ul>
+  </div>
+  <div class="panel ok">
+    <h4>修正後 <span class="tag ok">正確</span></h4>
+    <table>
+      <tr><th>order_id</th><th>修正後特徵怎麼算</th></tr>
+      <tr><td>ORD00071342</td><td class="okcell">同組沒有其他訂單 → 歷史 0 筆 → 用先驗值</td></tr>
+      <tr><td>ORD00073189</td><td class="okcell">同組沒有其他訂單 → 歷史 0 筆 → 用先驗值</td></tr>
+      <tr><td>ORD00022761<br>ORD00051213<br>ORD00001045</td><td class="okcell">只算同組中<b>下單當天以前</b>、且<b>結果已確定</b>（已出發）的訂單；沒有就用先驗值。自己永遠不算進去</td></tr>
+    </table>
+    <div class="note">
+      註：同一組裡誰先下單，要用 <code>order_created_at</code> 才排得出來；本範例沒有列出時間，所以只示意「自己被排除」這個原則，不列出修正後的數值。
+      先驗值是較粗分組（會員 × 產品類型 → 會員 → 整體）的平滑取消率（README 4.3）。
+    </div>
+  </div>
+</div>
+
+<div class="online">
+  <b>上線對照</b>（README 3.1、3.5）：上線時新訂單還沒有 label；若同一組會員 × 產品是第一次出現、查不到歷史，照訓練管線的 <code>fillna(0)</code> 推論，原管線的特徵會被補成 0，意思變成「從不取消」。修正後同樣情況改用先驗值。
+</div>
+    <figcaption>圖 1 的訂單與會員編號是從這份資料挑出的示例（在這份資料上），只用來示範機制。</figcaption>
+  </figure>
+  <div class="cols4">
+    <div class="tile"><span class="on">在這份資料上</span><div class="mid">95.9%</div><div class="lbl">的列所在的會員 × 產品組合只有一筆訂單（97,952 組中有 95,891 組只有一筆）</div></div>
+    <div class="tile"><span class="on">在這份資料上</span><div class="mid">98.99%</div><div class="lbl">的列上，這個特徵值完全等於標籤</div></div>
+    <div class="tile"><span class="on">在這份資料上</span><div class="mid">+6.4986</div><div class="lbl">它的模型係數；其他特徵都小於 0.1</div></div>
+    <div class="tile"><span class="on">在這份資料上</span><div class="mid">0.9999 → 0.7275</div><div class="lbl">重現原管線的 Test AUC；拿掉這個特徵後的 Test AUC</div></div>
+  </div>
+  <p class="narr sub">上線時新訂單還沒有結果，自己的標籤不存在；同一組會員與產品第一次出現時查不到歷史，特徵被補成 0（第 8 頁）。</p>
+  <p class="src">技術細節：<a href="README.md#31-member_product_cancel_rate-含自己的標籤">README 3.1</a>；數字見附錄 B、C、D。</p>
+</section>
+
+<!-- ============ 06 ============ -->
+<section class="scene" id="s6" aria-labelledby="h6">
+  <header><span class="no">06</span><h2 id="h6">其餘三個歷史特徵偷看了未來</h2></header>
+  <p class="narr"><b>會員取消率、產品取消率、會員訂單數，都用整段期間的訂單計算，包含這筆訂單之後才下的單。</b>兩個取消率還含自己的標籤；會員訂單數不含標籤，但數到了下單之後的訂單，同樣違反“只能用下單之前的資料”。</p>
+  <figure class="fig">
+    <div class="hscroll">
+    <svg class="ui" viewBox="0 0 860 210" role="img" aria-labelledby="futT">
+      <title id="futT">同一位會員的訂單排在時間軸上。原管線用整段期間（含自己與之後的單）計算；修正後只用下單之前、結果已確定的單。</title>
+      <defs>
+        <pattern id="f6-h" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" class="p-hbg"/><rect width="2" height="6" class="p-hst"/></pattern>
+        <pattern id="f6-d" width="6" height="6" patternUnits="userSpaceOnUse"><rect width="6" height="6" class="p-dbg"/><circle cx="3" cy="3" r="1.2" class="p-ddot"/></pattern>
+      </defs>
+      <text x="20" y="22" class="b">同一位會員的訂單（時間由左到右）</text>
+      <line class="ax" x1="150" y1="60" x2="820" y2="60"/>
+      <circle cx="190" cy="60" r="7" class="fok"/><circle cx="280" cy="60" r="7" class="fok"/><circle cx="360" cy="60" r="7" class="fok"/>
+      <circle cx="470" cy="60" r="10" class="hollow" style="stroke:var(--leak);stroke-width:3"/>
+      <text x="470" y="40" text-anchor="middle" class="tleak">要預測的這一筆</text>
+      <circle cx="580" cy="60" r="7" class="fgry"/><circle cx="670" cy="60" r="7" class="fgry"/><circle cx="760" cy="60" r="7" class="fgry"/>
+      <text x="655" y="88" text-anchor="middle" class="mut">之後才下的單（下單當下還不存在）</text>
+      <text x="275" y="88" text-anchor="middle" class="mut">之前下的單</text>
+      <!-- 原管線 -->
+      <text x="20" y="125" class="tleak">原管線</text>
+      <rect x="170" y="110" width="610" height="24" class="frame-leak" style="fill:url(#f6-h)"/>
+      <text x="475" y="127" text-anchor="middle" class="tleak">整段期間：含自己的答案，也含之後的單</text>
+      <!-- 修正後 -->
+      <text x="20" y="175" class="tok">修正後</text>
+      <rect x="170" y="160" width="210" height="24" class="frame-ok" style="fill:url(#f6-d)"/>
+      <text x="395" y="177" class="tok">只用下單之前、結果已確定的單；自己永遠不算</text>
+    </svg>
+    </div>
+  </figure>
+  <div class="cols">
+    <figure class="fig">
+      <svg class="ui" viewBox="0 0 460 210" role="img" aria-labelledby="aucBarT">
+        <title id="aucBarT">在這份資料上的單一特徵 AUC：會員取消率原樣 0.7263、排除自己 0.5021；產品取消率原樣 0.5480、排除自己 0.5039；會員訂單數 0.4983</title>
+        <!-- 0.5 在 x=170；每 0.01 = 10px：0.7263→396、0.5021→172、0.5480→218、0.5039→174、0.4983→168 -->
+        <text x="10" y="18" class="b">單一特徵 AUC（在這份資料上）</text>
+        <line class="sink" x1="170" y1="30" x2="170" y2="182" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <text x="170" y="200" text-anchor="middle" class="mut">0.5（亂猜）</text>
+        <text x="160" y="50" text-anchor="end" class="ink2">會員取消率 原樣</text>
+        <rect x="170" y="38" width="226" height="16" class="fleak"/><text x="402" y="51" class="b">0.7263</text>
+        <text x="160" y="72" text-anchor="end" class="ink2">排除自己</text>
+        <rect x="170" y="60" width="2" height="16" class="fok"/><text x="180" y="73">0.5021</text>
+        <text x="160" y="106" text-anchor="end" class="ink2">產品取消率 原樣</text>
+        <rect x="170" y="94" width="48" height="16" class="fleak"/><text x="224" y="107" class="b">0.5480</text>
+        <text x="160" y="128" text-anchor="end" class="ink2">排除自己</text>
+        <rect x="170" y="116" width="4" height="16" class="fok"/><text x="182" y="129">0.5039</text>
+        <text x="160" y="162" text-anchor="end" class="ink2">會員訂單數</text>
+        <rect x="168" y="150" width="2" height="16" fill="var(--gry)"/><text x="180" y="163">0.4983（不含標籤）</text>
+      </svg>
+      <figcaption>排除自己那筆之後，兩個取消率都回到亂猜附近：訊號來自自己的答案。</figcaption>
+    </figure>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="tile"><h3>為什麼會員取消率會洩漏</h3><div class="lbl">自己的標籤是分子的一部分，會員的訂單越少，自己那筆佔的比重越大。在這份資料上，會員訂單數中位數 12，自己的標籤約佔會員取消率的 1/12。</div></div>
+      <div class="tile"><h3>為什麼上線失效</h3><div class="lbl">上線時只有過去的資料：取消率少了自己的標籤與未來的結果；會員訂單數只數得到過去的訂單，數值比離線偏小，分布和訓練時不同。</div></div>
+    </div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#32-其餘三個歷史特徵用到未來資料">README 3.2</a>；數字見附錄 B、C、E</p>
+</section>
+
+<!-- ============ 07 ============ -->
+<section class="scene" id="s7" aria-labelledby="h7">
+  <header><span class="no">07</span><h2 id="h7">評估方式也錯：先算特徵、再隨機切</h2></header>
+  <p class="narr"><b>原管線先用全部資料算特徵，再隨機挑 25% 當測試集。</b>測試集的答案早就混進訓練集的特徵；隨機切又不看時間，模型會拿“未來”的結果去預測“過去”。上線永遠是用過去預測未來，拿不到這些資訊。</p>
+  <figure class="fig">
+    <div class="hscroll">
+    <svg class="ui" viewBox="0 0 860 260" role="img" aria-labelledby="splitT">
+      <title id="splitT">上：隨機切分，訓練與測試的訂單在時間上交錯，5/10 的測試訂單拿到同一會員 6/20 訓練訂單的結果。下：按時間切分，過去訓練、未來評估。</title>
+      <defs><marker id="f7-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="var(--leak)"/></marker></defs>
+      <!-- 時間軸 x=150～810；5 月 150～480、6 月 480～810 -->
+      <text x="20" y="28" class="tleak">隨機切分（原管線）</text>
+      <line class="ax" x1="150" y1="90" x2="810" y2="90"/>
+      <line class="grid" x1="480" y1="40" x2="480" y2="100"/>
+      <text x="315" y="114" text-anchor="middle" class="mut">5 月</text><text x="645" y="114" text-anchor="middle" class="mut">6 月</text>
+      <g>
+        <circle cx="180" cy="90" r="7" class="fok"/><rect x="223" y="83" width="14" height="14" class="hollow2"/>
+        <circle cx="290" cy="90" r="7" class="fok"/><circle cx="340" cy="90" r="7" class="fok"/><rect x="383" y="83" width="14" height="14" class="hollow2"/>
+        <circle cx="440" cy="90" r="7" class="fok"/><rect x="503" y="83" width="14" height="14" class="hollow2"/><circle cx="560" cy="90" r="7" class="fok"/>
+        <circle cx="610" cy="90" r="7" class="fok"/><rect x="723" y="83" width="14" height="14" class="hollow2"/><circle cx="780" cy="90" r="7" class="fok"/>
+      </g>
+      <!-- 5/10 測試（x≈252）← 6/20 訓練（x≈685） -->
+      <rect x="245" y="83" width="14" height="14" class="hollow2" style="stroke:var(--leak);stroke-width:3"/>
+      <circle cx="685" cy="90" r="8" class="fok" style="stroke:var(--leak);stroke-width:3"/>
+      <path d="M680 78 C 600 38, 340 38, 258 78" fill="none" stroke-width="2.2" class="sleak" marker-end="url(#f7-ar)"/>
+      <text x="252" y="70" text-anchor="middle" class="tleak">5/10 測試</text>
+      <text x="690" y="70" text-anchor="middle" class="tleak">6/20 訓練（同一會員）</text>
+      <text x="470" y="24" text-anchor="middle" class="tleak">6/20 的結果被算進 5/10 的特徵：用未來預測過去</text>
+      <!-- 按時間切 -->
+      <text x="20" y="168" class="tok">按時間切分（修正）</text>
+      <line class="ax" x1="150" y1="200" x2="810" y2="200"/>
+      <g>
+        <circle cx="180" cy="200" r="7" class="fok"/><circle cx="230" cy="200" r="7" class="fok"/><circle cx="290" cy="200" r="7" class="fok"/><circle cx="340" cy="200" r="7" class="fok"/><circle cx="390" cy="200" r="7" class="fok"/><circle cx="440" cy="200" r="7" class="fok"/>
+        <rect x="533" y="193" width="14" height="14" class="hollow2"/><rect x="603" y="193" width="14" height="14" class="hollow2"/><rect x="673" y="193" width="14" height="14" class="hollow2"/><rect x="743" y="193" width="14" height="14" class="hollow2"/>
+      </g>
+      <line x1="490" y1="170" x2="490" y2="215" class="sink" stroke-width="2.5"/>
+      <text x="300" y="230" text-anchor="middle" class="tok">過去：訓練</text>
+      <text x="650" y="230" text-anchor="middle" class="b">未來：評估</text>
+      <text x="490" y="252" text-anchor="middle" class="mut">完整做法還要留空檔、等整批出發（第 13 頁）</text>
+    </svg>
+    </div>
+    <div class="legend" style="margin-top:6px"><span><i style="background:var(--okc);border-radius:50%"></i>訓練集的訂單（實心圓）</span><span><i style="border:2.5px solid var(--s2);background:var(--surface)"></i>測試集的訂單（空心方塊）</span></div>
+  </figure>
+  <div class="cols">
+    <div class="tile"><h3>先算特徵、後切分</h3><p>主程式先呼叫 <code>build_features(orders)</code>，再在 <code>train</code> 裡切分。取消率是用全部資料的標籤算的，測試集的答案已經在訓練集的特徵裡。</p><p class="sub">在這份資料上：取消率只用 5 月訂單計算、套到 6 月訂單時，三個取消率的單一特徵 AUC 都回到 0.4985～0.5044。</p></div>
+    <div class="tile"><h3>隨機切分</h3><p>就算先算後切修好、取消率只用訓練集計算，隨機切仍會讓過去的訂單拿到未來的結果。資料若有時間趨勢，隨機切還會把未來的趨勢帶進訓練。</p><p class="sub">在這份資料上量不出影響：下單當下就拿得到的特徵，單一特徵 AUC 都在 0.498～0.505，沒有訊號可以被高估。正式資料若有時間趨勢仍會高估，所以列為主因。</p></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#33-先算特徵後切分">README 3.3</a>、<a href="README.md#34-隨機切分不是按時間切分">3.4</a>；數字見附錄 C、E</p>
+</section>
+
+<!-- ============ 08 ============ -->
+<section class="scene" id="s8" aria-labelledby="h8">
+  <header><span class="no">08</span><h2 id="h8">上線時查不到歷史，被補成 0</h2></header>
+  <p class="narr"><b>離線時每一列都查得到取消率，因為自己就在分組裡，所以管線裡的“缺值補 0”從來沒作用過。上線時新的會員 × 產品組合沒有歷史，就被補成 0，意思變成“從不取消”。</b>查不到歷史的訂單都拿到同一個 0，失去鑑別力，卻仍主導分數。</p>
+  <div class="cols">
+    <div class="tile bad">
+      <h3>離線（訓練、評估時）</h3>
+      <div class="bars" style="margin-top:8px">
+        <div class="brow"><span class="k">查得到取消率</span><div class="track"><div class="seg c1" style="width:100%"></div></div></div>
+      </div>
+      <p class="sub">每一列都查得到（自己就在組裡）。<code>fillna(0)</code> 實際上從沒作用，模型沒看過“補成 0”的列。</p>
+    </div>
+    <div class="tile bad">
+      <h3>上線（以過去預測未來）</h3>
+      <div class="bars" style="margin-top:8px">
+        <div class="brow"><span class="k">查得到取消率</span><div class="track"><div class="seg c1" style="width:2.03%"></div><span class="bval">2.03%</span></div></div>
+      </div>
+      <p class="sub">在這份資料上：以 5 月訂單的歷史計算時，6 月訂單只有 2.03% 查得到會員 × 產品取消率，其餘都會被補成 0。</p>
+    </div>
+  </div>
+  <div class="cols">
+    <div class="tile"><h3>這叫 training-serving skew</h3><div class="lbl">特徵在訓練時和上線時的分布完全不同，而離線評估看不到這個落差。</div></div>
+    <div class="tile"><h3>這一點是推論</h3><div class="lbl">看不到線上程式碼，上線端“補成 0”是依訓練管線的 <code>fillna(0)</code> 推論。修正做法見第 12 頁：沒有歷史時用較粗分組的取消率，不用 0。</div></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#35-上線時查不到歷史的特徵被補成-0">README 3.5</a>；數字見附錄 E</p>
+</section>
+
+<!-- ============ 09 ============ -->
+<section class="scene" id="s9" aria-labelledby="h9">
+  <header><span class="no">09</span><h2 id="h9">上游資料問題與次要問題</h2></header>
+  <p class="narr"><b>不在產品清單的產品編號，和第 5 頁是同一個機制：只有一筆訂單時，產品取消率就是自己的答案。</b>另外兩個問題漏的不是答案，列為次要：標準化只漏了數值尺度；重複列在時間切分後不會洩漏，只會讓計數重複。</p>
+  <div class="cols3">
+    <div class="tile bad"><span class="tag t-main">主因｜上游資料</span><h3 style="margin-top:6px">不在產品清單的產品編號</h3>
+      <p>在這份資料上：訂單裡有 <b>120 個</b>產品編號不在產品清單，每個只有一筆訂單；這 120 列的產品取消率 <b>100%</b> 等於標籤。</p>
+      <p class="sub">修法：視為未知產品，不算它自己的取消率、直接用整體取消率，並回報上游。</p></div>
+    <div class="tile"><span class="tag t-minor">次要</span><h3 style="margin-top:6px">標準化在切分前用了全部資料</h3>
+      <p>測試集的平均與標準差混進訓練。原則和“先算後切”相同，但漏的是數值尺度、不含答案。</p>
+      <p class="sub">在這份資料上，改成只用訓練集後 Test AUC 仍是 0.9999。修法：訓練集 fit，測試集只 transform。</p></div>
+    <div class="tile"><span class="tag t-minor">次要</span><h3 style="margin-top:6px">重複列</h3>
+      <p>同一張訂單重複出現，不含別筆的答案；按時間切分加上“嚴格早於下單時間”之後不會洩漏，只會讓計數重複。</p>
+      <p class="sub">在這份資料上：40 組重複、共 80 列，多出 40 列（約 0.04%），標籤都一致。修法：先依訂單編號去重。</p></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#36-不在產品清單的產品編號">README 3.6</a>、<a href="README.md#37-次要問題">3.7</a>；數字見附錄 B、D、F</p>
+</section>
+
+<!-- ============ 10 ============ -->
+<section class="scene" id="s10" aria-labelledby="h10">
+  <header><span class="no">10</span><h2 id="h10">四條原則</h2></header>
+  <p class="narr"><b>修正設計的核心是“時間點正確”：每筆訂單的特徵，只能用下單那一刻已經知道的事。</b>其餘三條是讓這件事在標籤、評估、上線三個地方都成立。</p>
+  <div class="prin">
+    <div class="tile"><h3><span class="num">1</span>時間點正確</h3><div class="lbl">每筆訂單的特徵，只能用下單那一刻已經知道的事。涵蓋排除自己的標籤，也涵蓋不用未來的訂單。</div></div>
+    <div class="tile"><h3><span class="num">2</span>標籤要等結果確定</h3><div class="lbl">還沒到出發日的訂單結果不確定，不拿來訓練或評估。</div></div>
+    <div class="tile"><h3><span class="num">3</span>離線模擬上線</h3><div class="lbl">用過去訓練、用未來評估。特徵的“現在時間”取下單當下已完成的最新一次每日批次（台北時間 00:00）；模型與標準化參數只從訓練集學。</div></div>
+    <div class="tile"><h3><span class="num">4</span>訓練與上線用同一支特徵函式</h3><div class="lbl">函式吃一個“現在時間”參數：訓練時傳歷史時間點，上線時傳當下時間，避免兩邊各寫一套而算法不一致。</div></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#41-四條原則">README 4.1</a>；虛擬碼見 <a href="README.md#45-虛擬碼">4.5</a></p>
+</section>
+
+<!-- ============ 11 ============ -->
+<section class="scene" id="s11" aria-labelledby="h11">
+  <header><span class="no">11</span><h2 id="h11">標籤要等結果確定</h2></header>
+  <p class="narr"><b>標籤：出發日之前被取消就是 1，出發日過了沒被取消就是 0。</b>原管線用資料擷取當下的狀態當答案，但“還沒取消”不等於“不會取消”，近期才下的單結果還不確定。</p>
+  <figure class="fig">
+    <div class="hscroll">
+    <svg class="ui" viewBox="0 0 860 200" role="img" aria-labelledby="lblT">
+      <title id="lblT">兩張訂單從下單到出發。出發前取消的標 1；撐到出發日的標 0；在判斷時間點時還沒出發的訂單，結果不確定，不能用。</title>
+      <defs><pattern id="f11-f" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" class="p-fbg"/><line x1="0" y1="4" x2="8" y2="4" class="p-fln" stroke-width="1"/></pattern></defs>
+      <rect x="560" y="30" width="290" height="140" fill="url(#f11-f)"/>
+      <line x1="560" y1="24" x2="560" y2="176" class="sink" stroke-width="2.5"/>
+      <text x="560" y="18" text-anchor="middle" class="b">判斷時間點 t</text>
+      <text x="705" y="190" text-anchor="middle" class="mut">t 之後：還不知道</text>
+      <!-- 1：出發前取消 -->
+      <text x="20" y="62" class="b">訂單甲</text>
+      <line x1="150" y1="58" x2="300" y2="58" class="use"/>
+      <line x1="150" y1="50" x2="150" y2="66" class="sok" stroke-width="2.5"/>
+      <path d="M300 51 L307 58 L300 65 L293 58 Z" class="fok"/>
+      <text x="316" y="62" class="tok">出發前取消 → 標 1</text>
+      <!-- 0：撐到出發 -->
+      <text x="20" y="104" class="b">訂單乙</text>
+      <line x1="200" y1="100" x2="460" y2="100" class="use"/>
+      <line x1="200" y1="92" x2="200" y2="108" class="sok" stroke-width="2.5"/>
+      <rect x="455" y="95" width="10" height="10" class="fok"/>
+      <text x="474" y="104" class="tok">出發日過了沒取消 → 標 0</text>
+      <!-- 不確定 -->
+      <text x="20" y="146" class="ink2 b">訂單丙</text>
+      <line x1="380" y1="142" x2="760" y2="142" class="drop"/>
+      <line x1="380" y1="134" x2="380" y2="150" class="sgry" stroke-width="2.5"/>
+      <rect x="755" y="137" width="10" height="10" class="fgry"/>
+      <text x="392" y="132" class="mut">到 t 時“還沒取消”，但還沒出發 → 結果不確定，不能用</text>
+    </svg>
+    </div>
+    <div class="legend" style="margin-top:6px"><span>│ 下單</span><span>◆ 取消</span><span>■ 出發</span><span><i style="background:var(--okc)"></i>可用（實線）</span><span><i style="background:var(--gry)"></i>不能用（虛線）</span></div>
+  </figure>
+  <div class="cols">
+    <div class="tile"><h3>代價：標籤會晚到</h3><div class="lbl">延遲等於下單到出發的天數，最新一段訂單永遠還不能用來訓練。正式環境有數年歷史，這只是讓訓練資料晚一段時間。在這份資料上，下單到出發中位數 63 天，以 07-01 為準只有 21,501 筆出發日已過；這是資料只有兩個月造成的，不能拿來評估設計好壞。</div></div>
+    <div class="tile"><h3>這份資料的疑點</h3><div class="lbl">在這份資料上，那 21,501 筆裡有 9,234 筆“已付款”、3,054 筆“已建立”，出發日已過卻沒走到完成。依定義它們沒被取消、標 0，但狀態語意可疑。</div></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#42-標籤定義">README 4.2</a>；數字見附錄 G</p>
+</section>
+
+<!-- ============ 12 ============ -->
+<section class="scene" id="s12" aria-labelledby="h12">
+  <header><span class="no">12</span><h2 id="h12">特徵怎麼重新算</h2></header>
+  <p class="narr"><b>三個取消率都改成“只算下單之前、結果已確定的訂單”；會員 × 產品取消率保留，因為會員對同一產品的取消傾向在業務上是合理的訊號，錯的是算法，不是特徵本身。</b></p>
+  <div class="tscroll"><table>
+    <thead><tr><th>特徵</th><th>原本的問題</th><th>修正後</th></tr></thead>
+    <tbody>
+      <tr><td>會員取消率</td><td>含自己的答案、用到未來（第 6 頁）</td><td>只算這位會員在下單之前、結果已確定的訂單</td></tr>
+      <tr><td>產品取消率</td><td>同上；不在產品清單的編號（第 9 頁）</td><td>同上；未知產品直接用整體取消率，並回報上游</td></tr>
+      <tr><td>會員 × 產品取消率</td><td>含自己的答案（第 5 頁）；上線查不到就補 0（第 8 頁）</td><td><b>保留，改正定義</b>：只算之前、已確定的同產品訂單，加平滑、附歷史筆數，歷史太少時逐層往較粗的分組靠攏</td></tr>
+      <tr><td>會員訂單數</td><td>數到未來的訂單（第 6 頁）</td><td>只數下單之前的單，不用等結果確定</td></tr>
+      <tr><td>金額、人數、折扣、距出發天數</td><td>下單當下就知道</td><td>不變；距出發天數以台北時間的日期計算</td></tr>
+    </tbody>
+  </table></div>
+  <div class="rowlbl">歷史太少時，逐層往較粗的分組靠攏（上一層的取消率當平滑的起點）</div>
+  <div class="pipe" role="img" aria-label="逐層靠攏：會員×產品 → 會員×產品類型 → 會員 → 整體">
+    <div class="bx good"><b>會員 × 產品</b><span class="sub">最細，但多數組合歷史很少</span></div><span class="ar">→</span>
+    <div class="bx"><b>會員 × 產品類型</b><span class="sub">未知產品跳過這層</span></div><span class="ar">→</span>
+    <div class="bx"><b>會員</b></div><span class="ar">→</span>
+    <div class="bx hl"><b>整體取消率</b><span class="sub">最粗的起點</span></div>
+  </div>
+  <div class="cols">
+    <div class="tile"><h3>平滑：樣本少就不要太相信它</h3>
+      <div class="formula">平滑取消率 = (取消筆數 + k × 先驗取消率) / (歷史筆數 + k)</div>
+      <p class="sub">歷史只有一兩筆時，取消率只會是 0、0.5、1 這種極端值。k 是“要幾筆歷史才相信它”，屬於可調參數，本設計不指定數值（虛擬碼的 k = 10 僅示意）。</p></div>
+    <div class="tile"><h3>沒有歷史時不補 0</h3><p>歷史是 0 筆時值等於先驗，而不是 0。0 的意思是“從不取消”，反而是很強的訊號。</p><p class="sub">另外附“歷史筆數”特徵，讓模型區分“真的有同產品歷史”和“只是退回較粗的分組”。</p></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#43-特徵計算">README 4.3</a>；虛擬碼的 <code>build_features(orders, as_of)</code> 見 <a href="README.md#45-虛擬碼">4.5</a></p>
+</section>
+
+<!-- ============ 13 ============ -->
+<section class="scene" id="s13" aria-labelledby="h13">
+  <header><span class="no">13</span><h2 id="h13">按時間切分、留空檔</h2></header>
+  <p class="narr"><b>取代隨機切分：模擬“在 D 這天部署模型”，D 之前訓練、D 之後評估，中間留空檔，而且一段訂單要等全部出發了才用。</b>答案要到出發日才揭曉，所以切分不只要按下單時間，還要處理“答案什麼時候揭曉”。下圖前兩張是錯誤做法，第三張是正確做法。</p>
+  <figure class="fig dg">
+<div class="legend">
+  <span><i class="sw pat-leak"></i><span class="tag leak">洩漏／錯誤</span> 紅色＋斜線、實線框</span>
+  <span><i class="sw pat-ok"></i><span class="tag ok">正確</span> 藍色＋圓點、虛線框</span>
+  <span><i class="sw" style="border-color:var(--grey);background:#e5e7ea"></i>灰色：被淘汰／不納入</span>
+</div>
+<div class="dgt">圖 2：時間軸切分 <span class="ref">對應 README 4.2、4.4、4.5</span></div>
+<p class="caption">
+  標籤要等出發日過了才確定（README 4.2），所以切分不只要按下單時間，還要處理「答案什麼時候揭曉」。
+  前兩張是錯誤做法，第三張是 README 4.4、4.5 的正確做法。
+</p>
+
+<!-- 2-1 -->
+<div class="dgs">2-1 錯誤做法：只篩「出發日早於切點」會有偏誤 <span class="tag leak">錯誤</span></div>
+<div class="svgwrap">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="300" viewBox="0 0 860 300" role="img" aria-label="切點 6/1 的時間軸，四張訂單 A、B、C、D 的下單到出發線段">
+  <defs>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="6" height="6" fill="#fdecea"/><rect width="2" height="6" fill="#e8988f"/>
+    </pattern>
+    <pattern id="dots" width="6" height="6" patternUnits="userSpaceOnUse">
+      <rect width="6" height="6" fill="#e6f0f7"/><circle cx="3" cy="3" r="1.2" fill="#7fa9c8"/>
+    </pattern>
+  </defs>
+  <!-- 切點右側：出發日在切點之後就被淘汰 -->
+  <rect x="388" y="30" width="460" height="200" fill="url(#hatch)" opacity="0.45"/>
+  <text x="400" y="48" font-size="12" fill="#b42318">出發日在切點之後 → 樣本被淘汰</text>
+  <!-- 時間軸 -->
+  <line x1="130" y1="240" x2="790" y2="240" stroke="#1f2328" stroke-width="1.5"/>
+  <g font-size="11" fill="#57606a" text-anchor="middle">
+    <line x1="172" y1="236" x2="172" y2="244" stroke="#1f2328"/><text x="172" y="258">5/5</text>
+    <line x1="292" y1="236" x2="292" y2="244" stroke="#1f2328"/><text x="292" y="258">5/20</text>
+    <line x1="372" y1="236" x2="372" y2="244" stroke="#1f2328"/><text x="366" y="272">5/30</text>
+    <line x1="380" y1="236" x2="380" y2="244" stroke="#1f2328"/><text x="380" y="258">5/31</text>
+    <line x1="540" y1="236" x2="540" y2="244" stroke="#1f2328"/><text x="540" y="258">6/20</text>
+    <line x1="740" y1="236" x2="740" y2="244" stroke="#1f2328"/><text x="740" y="258">7/15</text>
+  </g>
+  <!-- 切點 -->
+  <line x1="388" y1="22" x2="388" y2="248" stroke="#b42318" stroke-width="2.5" stroke-dasharray="6 3"/>
+  <text x="388" y="16" font-size="13" font-weight="bold" fill="#b42318" text-anchor="middle">切點 6/1</text>
+  <!-- 訂單：圓點＝下單，方塊＝出發 -->
+  <g font-size="12">
+    <!-- A 5/5→5/20 留 -->
+    <text x="20" y="74" font-weight="bold">A</text><text x="38" y="74" fill="#57606a">15 天</text>
+    <line x1="172" y1="70" x2="292" y2="70" stroke="#1f5f8b" stroke-width="5"/>
+    <circle cx="172" cy="70" r="5" fill="#1f5f8b"/><rect x="287" y="65" width="10" height="10" fill="#1f5f8b"/>
+    <text x="302" y="74" fill="#1f5f8b" font-weight="bold">留</text>
+    <!-- B 5/5→7/15 不留 -->
+    <text x="20" y="114" font-weight="bold" fill="#6b7075">B</text><text x="38" y="114" fill="#6b7075">71 天</text>
+    <line x1="172" y1="110" x2="740" y2="110" stroke="#9aa0a6" stroke-width="5" stroke-dasharray="8 4"/>
+    <circle cx="172" cy="110" r="5" fill="#9aa0a6"/><rect x="735" y="105" width="10" height="10" fill="#9aa0a6"/>
+    <text x="752" y="114" fill="#6b7075">不留</text>
+    <!-- C 5/30→5/31 留 -->
+    <text x="20" y="154" font-weight="bold">C</text><text x="38" y="154" fill="#57606a">1 天</text>
+    <line x1="372" y1="150" x2="380" y2="150" stroke="#1f5f8b" stroke-width="5"/>
+    <circle cx="372" cy="150" r="5" fill="#1f5f8b"/><rect x="377" y="145" width="10" height="10" fill="#1f5f8b"/>
+    <text x="300" y="154" fill="#1f5f8b" font-weight="bold">留</text>
+    <!-- D 5/30→6/20 不留 -->
+    <text x="20" y="194" font-weight="bold" fill="#6b7075">D</text><text x="38" y="194" fill="#6b7075">21 天</text>
+    <line x1="372" y1="190" x2="540" y2="190" stroke="#9aa0a6" stroke-width="5" stroke-dasharray="8 4"/>
+    <circle cx="372" cy="190" r="5" fill="#9aa0a6"/><rect x="535" y="185" width="10" height="10" fill="#9aa0a6"/>
+    <text x="552" y="194" fill="#6b7075">不留</text>
+  </g>
+  <g font-size="11" fill="#57606a">
+    <circle cx="140" cy="288" r="4" fill="#57606a"/><text x="150" y="292">下單</text>
+    <rect x="196" y="284" width="8" height="8" fill="#57606a"/><text x="210" y="292">出發</text>
+    <line x1="250" y1="288" x2="280" y2="288" stroke="#1f5f8b" stroke-width="4"/><text x="286" y="292">留下（藍實線）</text>
+    <line x1="380" y1="288" x2="410" y2="288" stroke="#9aa0a6" stroke-width="4" stroke-dasharray="6 3"/><text x="416" y="292">被淘汰（灰虛線）</text>
+  </g>
+</svg>
+</div>
+<p class="caption"><b>結論：越靠近切點，只剩短天期的單留得下。</b>A、B 都在 5/5 下單，但只有 15 天的 A 留下；C、D 都在 5/30 下單，只有 1 天的 C 留下。訓練與評估都會偏向短天期訂單，而 <code>days_to_departure</code> 本身就是特徵（README 4.4）。</p>
+
+<!-- 2-2 -->
+<div class="dgs">2-2 錯誤做法：訓練段和評估段緊接、不留空檔 <span class="tag leak">錯誤</span></div>
+<div class="svgwrap">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="220" viewBox="0 0 860 220" role="img" aria-label="3 月與 4 月下的單答案都在 5 到 7 月揭曉，揭曉時間重疊">
+  <defs>
+    <pattern id="hatch2" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="6" height="6" fill="#fdecea"/><rect width="2" height="6" fill="#e8988f"/>
+    </pattern>
+  </defs>
+  <g font-size="12" fill="#57606a" text-anchor="middle">
+    <text x="220" y="20">3 月</text><text x="340" y="20">4 月</text><text x="460" y="20">5 月</text><text x="580" y="20">6 月</text><text x="700" y="20">7 月</text>
+  </g>
+  <g stroke="#d0d7de"><line x1="160" y1="28" x2="160" y2="175"/><line x1="280" y1="28" x2="280" y2="175"/><line x1="400" y1="28" x2="400" y2="175"/><line x1="520" y1="28" x2="520" y2="175"/><line x1="640" y1="28" x2="640" y2="175"/><line x1="760" y1="28" x2="760" y2="175"/></g>
+  <!-- 訓練段 -->
+  <text x="10" y="62" font-size="12" font-weight="bold">訓練段</text>
+  <text x="10" y="78" font-size="11" fill="#57606a">3 月下的單</text>
+  <rect x="160" y="50" width="120" height="26" fill="#1f2328" opacity="0.8"/>
+  <text x="220" y="68" font-size="11" fill="#fff" text-anchor="middle">下單</text>
+  <rect x="400" y="50" width="360" height="26" fill="url(#hatch2)" stroke="#b42318" stroke-width="1.5"/>
+  <text x="580" y="68" font-size="11" fill="#b42318" text-anchor="middle">答案在 5～7 月揭曉</text>
+  <!-- 評估段 -->
+  <text x="10" y="122" font-size="12" font-weight="bold">評估段</text>
+  <text x="10" y="138" font-size="11" fill="#57606a">4 月下的單</text>
+  <rect x="280" y="110" width="120" height="26" fill="#1f2328" opacity="0.8"/>
+  <text x="340" y="128" font-size="11" fill="#fff" text-anchor="middle">下單</text>
+  <rect x="400" y="110" width="360" height="26" fill="url(#hatch2)" stroke="#b42318" stroke-width="1.5"/>
+  <text x="580" y="128" font-size="11" fill="#b42318" text-anchor="middle">答案在 5～7 月揭曉</text>
+  <!-- 颱風：6 月下旬 -->
+  <rect x="580" y="40" width="44" height="106" fill="none" stroke="#b42318" stroke-width="2.5" stroke-dasharray="4 3"/>
+  <text x="602" y="165" font-size="12" font-weight="bold" fill="#b42318" text-anchor="middle">6 月下旬颱風（示意）</text>
+  <text x="602" y="181" font-size="11" fill="#b42318" text-anchor="middle">同時影響兩段的結果</text>
+  <text x="400" y="208" font-size="12" fill="#1f2328" text-anchor="middle">兩段的揭曉時間重疊：訓練集裡已經有評估期間才確定的結果，模型等於學到評估期間的事。</text>
+</svg>
+</div>
+<p class="caption">（月份與颱風皆為示意）3 月和 4 月下的單，答案都要到 5～7 月才揭曉，兩段的揭曉時間完全重疊。同一段時間的取消潮（例如 6 月下旬的颱風）會同時寫進訓練與評估的答案，離線分數因此高估（README 4.4）。</p>
+
+<!-- 2-3 -->
+<div class="dgs">2-3 正確做法：訓練段 → 空檔 → 部署日 D → 評估段，並滑動視窗 <span class="tag ok">正確</span></div>
+<div class="svgwrap">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="270" viewBox="0 0 860 270" role="img" aria-label="訓練段、空檔、部署日 D、評估段，以及 D 往後滑動的三個視窗">
+  <defs>
+    <pattern id="dots2" width="6" height="6" patternUnits="userSpaceOnUse">
+      <rect width="6" height="6" fill="#e6f0f7"/><circle cx="3" cy="3" r="1.2" fill="#7fa9c8"/>
+    </pattern>
+    <pattern id="grey2" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#f2f3f4"/><line x1="0" y1="4" x2="8" y2="4" stroke="#c4c8cc" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <!-- 主圖 -->
+  <g font-size="12">
+    <rect x="120" y="30" width="180" height="40" fill="url(#dots2)" stroke="#1f5f8b" stroke-width="2"/>
+    <text x="210" y="48" text-anchor="middle" font-weight="bold" fill="#1f5f8b">訓練段</text>
+    <text x="210" y="63" text-anchor="middle" font-size="11" fill="#1f5f8b">一段下單區間</text>
+    <rect x="300" y="30" width="200" height="40" fill="url(#grey2)" stroke="#9aa0a6" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="400" y="48" text-anchor="middle" font-weight="bold" fill="#57606a">空檔</text>
+    <text x="400" y="63" text-anchor="middle" font-size="11" fill="#57606a">至少是最長的下單到出發天數</text>
+    <line x1="500" y1="18" x2="500" y2="84" stroke="#1f2328" stroke-width="2.5"/>
+    <text x="500" y="14" text-anchor="middle" font-weight="bold">部署日 D</text>
+    <rect x="500" y="30" width="180" height="40" fill="url(#dots2)" stroke="#1f5f8b" stroke-width="2" stroke-dasharray="6 3"/>
+    <text x="590" y="48" text-anchor="middle" font-weight="bold" fill="#1f5f8b">評估段</text>
+    <text x="590" y="63" text-anchor="middle" font-size="11" fill="#1f5f8b">D 之後才下的單</text>
+    <text x="120" y="102" font-size="11" fill="#57606a">訓練段的訂單在 D 之前全部出發、結果都已確定；評估段也要全部出發後才評估。模型與 scaler 只從訓練段學。</text>
+  </g>
+  <line x1="110" y1="125" x2="830" y2="125" stroke="#d0d7de"/>
+  <text x="20" y="148" font-size="12" font-weight="bold">滑動視窗</text>
+  <text x="20" y="163" font-size="11" fill="#57606a">D 往後移動多次</text>
+  <g font-size="11">
+    <!-- 視窗 1 -->
+    <text x="120" y="160" fill="#57606a">視窗 1</text>
+    <rect x="170" y="148" width="90" height="18" fill="url(#dots2)" stroke="#1f5f8b"/>
+    <rect x="260" y="148" width="100" height="18" fill="url(#grey2)" stroke="#9aa0a6" stroke-dasharray="4 2"/>
+    <line x1="360" y1="142" x2="360" y2="172" stroke="#1f2328" stroke-width="2"/><text x="360" y="139" text-anchor="middle">D</text>
+    <rect x="360" y="148" width="90" height="18" fill="url(#dots2)" stroke="#1f5f8b" stroke-dasharray="4 2"/>
+    <!-- 視窗 2 -->
+    <text x="120" y="200" fill="#57606a">視窗 2</text>
+    <rect x="260" y="188" width="90" height="18" fill="url(#dots2)" stroke="#1f5f8b"/>
+    <rect x="350" y="188" width="100" height="18" fill="url(#grey2)" stroke="#9aa0a6" stroke-dasharray="4 2"/>
+    <line x1="450" y1="182" x2="450" y2="212" stroke="#1f2328" stroke-width="2"/><text x="450" y="179" text-anchor="middle">D</text>
+    <rect x="450" y="188" width="90" height="18" fill="url(#dots2)" stroke="#1f5f8b" stroke-dasharray="4 2"/>
+    <!-- 視窗 3 -->
+    <text x="120" y="240" fill="#57606a">視窗 3</text>
+    <rect x="350" y="228" width="90" height="18" fill="url(#dots2)" stroke="#1f5f8b"/>
+    <rect x="440" y="228" width="100" height="18" fill="url(#grey2)" stroke="#9aa0a6" stroke-dasharray="4 2"/>
+    <line x1="540" y1="222" x2="540" y2="252" stroke="#1f2328" stroke-width="2"/><text x="540" y="219" text-anchor="middle">D</text>
+    <rect x="540" y="228" width="90" height="18" fill="url(#dots2)" stroke="#1f5f8b" stroke-dasharray="4 2"/>
+    <text x="650" y="200" fill="#57606a">每次都是「訓練一段、空檔、評估一段」</text>
+    <text x="650" y="216" fill="#57606a">看結果穩不穩，也模擬定期重新訓練</text>
+  </g>
+</svg>
+</div>
+<p class="caption">訓練段和部署日 D 之間的空檔，就是等訓練段全部出發的時間，至少是最長的下單到出發天數，所以訓練集不會含評估期間才確定的結果。D 往後滑多次，每個視窗各自模擬一次「在 D 這天部署」（README 4.4、4.5）。</p>
+  </figure>
+  <div class="cols3">
+    <div class="tile"><h3>不能只篩“出發日早於切點”</h3><div class="lbl">越靠近切點，只剩短天期的單留得下，而“距出發天數”本身就是特徵。（圖 2-1）</div></div>
+    <div class="tile"><h3>空檔至少是最長的下單到出發天數</h3><div class="lbl">不留空檔，訓練集會有評估期間才確定的結果，例如同一段時間的取消潮。（圖 2-2）</div></div>
+    <div class="tile"><h3>滑動視窗</h3><div class="lbl">D 往後滑多次，看結果穩不穩，也模擬定期重新訓練。模型與標準化只從訓練段學。（圖 2-3）</div></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#44-資料切分與評估">README 4.4</a>、<a href="README.md#45-虛擬碼">4.5 虛擬碼</a>。</p>
+</section>
+
+<!-- ============ 14 ============ -->
+<section class="scene" id="s14" aria-labelledby="h14">
+  <header><span class="no">14</span><h2 id="h14">每個問題由哪個修法解決</h2></header>
+  <p class="narr"><b>每個診斷出的問題都有對應的修法。</b></p>
+  <div class="tscroll"><table>
+    <thead><tr><th>問題</th><th>修法</th><th>見</th></tr></thead>
+    <tbody>
+      <tr><td>會員 × 產品取消率含自己的答案</td><td>保留，改成時間點正確的定義＋平滑＋逐層靠攏</td><td>第 12 頁</td></tr>
+      <tr><td>三個特徵用到未來資料</td><td>只看下單之前的單；取消率只用出發日已過的單</td><td>第 10、12 頁</td></tr>
+      <tr><td>先算特徵、後切分</td><td>特徵以每筆的下單日計算；模型與標準化只從訓練集學</td><td>第 10、13 頁</td></tr>
+      <tr><td>隨機切分</td><td>按下單時間整批切分、留空檔、整批出發後才用、滑動視窗</td><td>第 13 頁</td></tr>
+      <tr><td>上線查不到歷史被補成 0</td><td>平滑、逐層靠攏、附歷史筆數，不用補 0</td><td>第 12 頁</td></tr>
+      <tr><td>不在產品清單的編號</td><td>不算自己的取消率，直接用整體取消率；回報上游</td><td>第 9、12 頁</td></tr>
+      <tr><td>標準化在切分前 fit</td><td>只 fit 訓練集</td><td>第 13 頁</td></tr>
+      <tr><td>重複列</td><td>先依訂單編號去重</td><td>第 9 頁</td></tr>
+    </tbody>
+  </table></div>
+  <p class="src">技術細節：<a href="README.md#46-問題與修法對照">README 4.6</a></p>
+</section>
+
+<!-- ============ 15 ============ -->
+<section class="scene" id="s15" aria-labelledby="h15">
+  <header><span class="no">15</span><h2 id="h15">升級方向：存活分析</h2></header>
+  <p class="narr"><b>本設計要等出發日過了才能用一張訂單；存活分析能用上還沒出發的訂單。</b>它不問“會不會取消”，改問“取消會在什麼時候發生”。還沒出發、也還沒取消的訂單，記成“到今天為止還沒取消”（設限資料），照樣拿來訓練。</p>
+  <figure class="fig">
+    <div class="hscroll">
+    <svg class="ui" viewBox="0 0 860 350" role="img" aria-labelledby="survT">
+      <title id="survT">同樣四張訂單、同一個今天。本設計只用已出發的 A、B，丟掉還沒出發的 C、D；存活分析把 C 記為設限（空心圓），D 的取消記為事件（實心菱形），四張都能用。</title>
+      <defs><pattern id="f15-f" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" class="p-fbg"/><line x1="0" y1="4" x2="8" y2="4" class="p-fln" stroke-width="1"/></pattern></defs>
+      <rect x="600" y="30" width="250" height="272" fill="url(#f15-f)"/>
+      <text x="725" y="22" text-anchor="middle" class="mut" style="font-size:11px">今天之後：還沒發生</text>
+      <line x1="600" y1="26" x2="600" y2="306" class="sink" stroke-width="2.5"/>
+      <text x="600" y="18" text-anchor="middle" class="b">今天</text>
+
+      <rect x="10" y="30" width="840" height="130" class="frame-gry"/>
+      <text x="22" y="50" class="b">本設計：要等出發日過了才能用</text>
+      <text x="22" y="76" class="b">A</text><text x="38" y="76" class="mut">已出發、沒取消</text>
+      <line x1="190" y1="72" x2="400" y2="72" class="use"/><line x1="190" y1="64" x2="190" y2="80" class="sok" stroke-width="2.5"/>
+      <rect x="395" y="67" width="10" height="10" class="fok"/><text x="414" y="76" class="tok">用：標 0</text>
+      <text x="22" y="100" class="b">B</text><text x="38" y="100" class="mut">已出發、取消過</text>
+      <line x1="230" y1="96" x2="330" y2="96" class="use"/><line x1="230" y1="88" x2="230" y2="104" class="sok" stroke-width="2.5"/>
+      <path d="M330 89 L337 96 L330 103 L323 96 Z" class="fok"/><text x="346" y="100" class="tok">用：標 1</text>
+      <text x="22" y="124" class="b mut">C</text><text x="38" y="124" class="mut">還沒出發、沒取消</text>
+      <line x1="300" y1="120" x2="720" y2="120" class="drop"/><line x1="300" y1="112" x2="300" y2="128" class="sgry" stroke-width="2.5"/>
+      <rect x="715" y="115" width="10" height="10" class="fgry"/><text x="734" y="124" class="mut">丟掉</text>
+      <text x="22" y="148" class="b mut">D</text><text x="38" y="148" class="mut">還沒出發、已取消</text>
+      <line x1="420" y1="144" x2="780" y2="144" class="drop"/><line x1="420" y1="136" x2="420" y2="152" class="sgry" stroke-width="2.5"/>
+      <path d="M520 137 L527 144 L520 151 L513 144 Z" class="fgry"/>
+      <rect x="775" y="139" width="10" height="10" class="fgry"/><text x="794" y="148" class="mut">丟掉</text>
+
+      <rect x="10" y="172" width="840" height="130" class="frame-ok"/>
+      <text x="22" y="192" class="tok">存活分析：還沒出發的也能用</text>
+      <text x="22" y="218" class="b">A</text><text x="38" y="218" class="mut">已出發、沒取消</text>
+      <line x1="190" y1="214" x2="400" y2="214" class="use"/><line x1="190" y1="206" x2="190" y2="222" class="sok" stroke-width="2.5"/>
+      <rect x="395" y="209" width="10" height="10" class="fok"/><text x="414" y="218" class="tok">用：撐到出發</text>
+      <text x="22" y="242" class="b">B</text><text x="38" y="242" class="mut">已出發、取消過</text>
+      <line x1="230" y1="238" x2="330" y2="238" class="use"/><line x1="230" y1="230" x2="230" y2="246" class="sok" stroke-width="2.5"/>
+      <path d="M330 231 L337 238 L330 245 L323 238 Z" class="fok"/><text x="346" y="242" class="tok">用：取消（事件）</text>
+      <text x="22" y="266" class="b">C</text><text x="38" y="266" class="mut">還沒出發、沒取消</text>
+      <line x1="300" y1="262" x2="594" y2="262" class="use"/><line x1="300" y1="254" x2="300" y2="270" class="sok" stroke-width="2.5"/>
+      <circle cx="600" cy="262" r="6.5" class="hollow"/>
+      <rect x="612" y="252" width="222" height="18" class="bgsurf" opacity="0.9"/>
+      <text x="616" y="266" class="tok">用：設限（到今天為止還沒取消）</text>
+      <text x="22" y="290" class="b">D</text><text x="38" y="290" class="mut">還沒出發、已取消</text>
+      <line x1="420" y1="286" x2="520" y2="286" class="use"/><line x1="420" y1="278" x2="420" y2="294" class="sok" stroke-width="2.5"/>
+      <path d="M520 279 L527 286 L520 293 L513 286 Z" class="fok"/><text x="536" y="290" class="tok">用：取消（事件）</text>
+
+      <g style="font-size:11px">
+        <line x1="22" y1="324" x2="22" y2="336" class="sink" stroke-width="2.5"/><text x="30" y="334" class="mut">下單</text>
+        <rect x="70" y="325" width="9" height="9" style="fill:var(--muted)"/><text x="85" y="334" class="mut">出發</text>
+        <path d="M132 323 L138 329 L132 335 L126 329 Z" style="fill:var(--muted)"/><text x="144" y="334" class="mut">取消（實心＝事件）</text>
+        <circle cx="262" cy="329" r="5" class="bgsurf" style="stroke:var(--muted);stroke-width:2"/><text x="272" y="334" class="mut">設限（空心＝到今天還沒取消）</text>
+        <line x1="440" y1="329" x2="470" y2="329" class="sok" stroke-width="4"/><text x="476" y="334" class="mut">用得到（藍實線）</text>
+        <line x1="590" y1="329" x2="620" y2="329" class="sgry" stroke-width="4" stroke-dasharray="6 3"/><text x="626" y="334" class="mut">丟掉（灰虛線）</text>
+      </g>
+    </svg>
+    </div>
+    <figcaption>圖 3（示意，不含資料數字）：差別在 C、D。本設計只用出發日已過的訂單，D 就算已經取消也要先丟掉；存活分析把 C 記成設限、D 記成事件，都能進訓練。前提是知道 D 在什麼時候取消。</figcaption>
+  </figure>
+  <div class="cols">
+    <div class="tile good"><h3>和本設計的差別</h3><div class="lbl">本設計要等整批訂單出發才能用，取消行為若在變，模型會慢半拍。存活分析不用等，資料比較新也比較多。時間切分仍要做，只是空檔可以縮短。</div></div>
+    <div class="tile good"><h3>離散時間版仍是邏輯迴歸</h3><div class="lbl">把每張訂單拆成“每一段時間一列”，每列標“這段內有沒有取消”，用一般的 logistic regression 訓練。工具鏈不用換，時間點正確和按時間切分的原則照用。</div></div>
+    <div class="tile"><h3>不能反過來只留已取消的</h3><div class="lbl">只留還沒出發訂單裡已取消的、丟掉還沒取消的，會高估近期訂單的取消率；要用設限的方式處理。</div></div>
+    <div class="tile bad"><h3>前提：要有取消時間</h3><div class="lbl">這份資料只有最後狀態、沒有取消時間欄位，所以只能列為正式環境的升級方向。評估指標也要換成能處理設限的，例如時間相依 AUC（time-dependent AUC）。</div></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#48-升級方向存活分析">README 4.8</a>、<a href="README.md#47-已知限制與升級方向">4.7</a>；來源：<a href="https://lifelines.readthedocs.io/en/latest/Survival%20Analysis%20intro.html">lifelines：Censoring</a>、<a href="https://scikit-survival.readthedocs.io/en/stable/user_guide/evaluating-survival-models.html">scikit-survival：Evaluating Survival Models</a></p>
+</section>
+
+<!-- ============ 16 ============ -->
+<section class="scene" id="s16" aria-labelledby="h16">
+  <header><span class="no">16</span><h2 id="h16">防線一：答案打亂測試</h2></header>
+  <p class="narr"><b>把答案隨機打亂，訂單和答案之間的真實關係就被破壞，正常的特徵預測不了，AUC 應該接近 0.5。打亂後 AUC 仍明顯高於 0.5，就代表有特徵是用這筆訂單自己的答案算出來的。</b>放在 CI，每次修改特徵管線都自動跑，沒通過就不能合併。</p>
+  <div class="rowlbl">正常的特徵</div>
+  <div class="pipe">
+    <div class="bx"><b>打亂答案</b><span class="sub">訂單不變，答案隨機重排</span></div><span class="ar">→</span>
+    <div class="bx"><b>整條管線重跑</b><span class="sub">特徵、切分、訓練、評估</span></div><span class="ar">→</span>
+    <div class="bx"><b>特徵和打亂的答案無關</b></div><span class="ar">→</span>
+    <div class="bx good"><b>AUC 接近 0.5</b><span class="tag t-ok">通過</span></div>
+  </div>
+  <div class="rowlbl">含自己答案的特徵（例如原本的會員 × 產品取消率）</div>
+  <div class="pipe">
+    <div class="bx"><b>打亂答案</b><span class="sub">訂單不變，答案隨機重排</span></div><span class="ar">→</span>
+    <div class="bx"><b>整條管線重跑</b><span class="sub">打亂後的答案又被算進特徵</span></div><span class="ar">→</span>
+    <div class="bx"><b>特徵照樣猜中</b></div><span class="ar">→</span>
+    <div class="bx bad"><b>AUC 仍明顯高於 0.5</b><span class="tag t-no">擋下，不能合併</span></div>
+  </div>
+  <div class="cols3">
+    <div class="tile"><h3>門檻</h3><div class="lbl">換幾個亂數種子重跑，檢定打亂後 AUC 的平均是否顯著高於 0.5，不用固定的寬鬆值。</div></div>
+    <div class="tile"><h3>成本</h3><div class="lbl">每次 CI 多跑幾次完整流程；資料用固定的抽樣來控制時間。</div></div>
+    <div class="tile"><h3>限制</h3><div class="lbl">自己的答案在特徵裡佔比越小，訊號越弱，越難測出。</div></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#51-防線一答案打亂測試">README 5.1</a>（測試函式 <code>test_label_shuffle</code>）</p>
+</section>
+
+<!-- ============ 17 ============ -->
+<section class="scene" id="s17" aria-labelledby="h17">
+  <header><span class="no">17</span><h2 id="h17">防線二：影子測試與上線監控</h2></header>
+  <p class="narr"><b>新模型先接上真實訂單，只預測、不採用，業務照舊。</b>取消的答案要到出發日才揭曉，所以分兩種指標：預測當下就看得到的先行指標，和出發後才有的結果指標。</p>
+  <ol class="flow">
+    <li class="pre"><span class="st">1</span><div><div class="nm">影子測試</div><div class="ds">新模型對真實訂單打分，但不採用，業務照舊。</div></div><span class="out"></span></li>
+    <li><span class="st">2</span><div><div class="nm">先行指標（預測當下就有）</div><div class="ds">比較線上算出的特徵和離線訓練時的分布、缺值率。例如第 8 頁的“上線缺值率和離線不同”，在這裡馬上看得到。</div></div><span class="out"><span class="tag t-ok">馬上知道</span></span></li>
+    <li><span class="st">3</span><div><div class="nm">結果指標（出發後才有）</div><div class="ds">只用出發日已過的訂單算線上 AUC，避免提早出現的取消單讓結果偏掉，再和離線比較。</div></div><span class="out"><span class="tag t-minor">要等出發</span></span></li>
+    <li><span class="st">4</span><div><div class="nm">放行</div><div class="ds">先行指標沒有異常、結果指標也接近離線，才正式採用。</div></div><span class="out"></span></li>
+    <li><span class="st">5</span><div><div class="nm">上線後持續監控</div><div class="ds">持續看這兩種指標，異常就告警或退回舊模型。</div></div><span class="out"></span></li>
+  </ol>
+  <p class="quote">業務若會依預測去挽留客人，要保留一組不介入的對照組來算結果指標，否則介入本身會改變取消結果。</p>
+  <p class="src">技術細節：<a href="README.md#52-防線二影子測試與上線監控">README 5.2</a></p>
+</section>
+
+<!-- ============ 18 ============ -->
+<section class="scene" id="s18" aria-labelledby="h18">
+  <header><span class="no">18</span><h2 id="h18">兩道防線各擋得住什麼</h2></header>
+  <p class="narr"><b>CI 的答案打亂測試專門擋“特徵含自己的答案”；偷看未來和訓練／上線算法不一致，要靠上線前後的影子測試與監控。</b></p>
+  <div class="tscroll"><table>
+    <thead><tr><th>問題類型</th><th>本次的例子</th><th>防線一：答案打亂測試</th><th>防線二：影子測試與監控</th></tr></thead>
+    <tbody>
+      <tr><td>特徵含自己的答案</td><td>第 5、6 頁的取消率</td><td><span class="tag t-ok">擋得住</span></td><td><span class="tag t-ok">擋得住</span></td></tr>
+      <tr><td>偷看未來</td><td>第 6 頁用到別筆訂單的未來結果、第 7 頁隨機切</td><td><span class="tag t-no">擋不住</span><div class="sub">打亂後別筆的答案也亂了</div></td><td><span class="tag t-ok">擋得住</span><div class="sub">分布有差由先行指標發現，否則等結果指標</div></td></tr>
+      <tr><td>訓練與上線算法不一致（和答案無關）</td><td>訓練和上線各寫一套、時區處理不同</td><td><span class="tag t-no">擋不住</span></td><td><span class="tag t-ok">擋得住</span><div class="sub">先行指標</div></td></tr>
+    </tbody>
+  </table></div>
+  <div class="cols">
+    <div class="tile"><h3>上線補 0 也擋得到</h3><div class="lbl">第 8 頁是第 5 頁在上線端的症狀，源頭是同一個特徵含自己的答案：防線一會透過第 5 頁擋下，防線二的先行指標也看得到。</div></div>
+    <div class="tile"><h3>接受的代價</h3><div class="lbl">偷看未來的問題 CI 擋不到；分布上看不出差異的（例如只有隨機切），要等結果指標，也就是要等訂單出發。</div></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#53-擋得住哪一類問題">README 5.3</a></p>
+</section>
+
+<!-- ============ 19 ============ -->
+<section class="scene" id="s19" aria-labelledby="h19">
+  <header><span class="no">19</span><h2 id="h19">怎麼驗證的、還有哪些限制</h2></header>
+  <p class="narr"><b>機制結論靠讀程式碼證明；數字靠資料查詢和自寫模型重現，只當佐證。</b>修正設計另由獨立審查逐行確認虛擬碼沒有任何特徵用到下單之後的資訊。</p>
+  <div class="cols4">
+    <div class="tile"><h3>讀程式碼</h3><div class="lbl">所有機制結論：特徵怎麼算、呼叫順序、切分方式、補值方式</div></div>
+    <div class="tile"><h3>資料查詢</h3><div class="lbl">用 pandas 查組合筆數、特徵等於標籤的比例、覆蓋率、不在產品清單的編號、重複列</div></div>
+    <div class="tile"><h3>自寫模型重現</h3><div class="lbl">numpy 自寫邏輯迴歸與 AUC：重現原管線、移除特徵、排除自己、按時間切分</div></div>
+    <div class="tile"><h3>修正設計檢查</h3><div class="lbl">獨立審查逐行確認虛擬碼沒有用到下單之後的資訊</div></div>
+  </div>
+  <div class="cols">
+    <div class="tile bad"><h3>限制</h3>
+      <p><b>沒有用 scikit-learn 實跑</b>：AUC 全部來自自寫模型，切分和 <code>train_test_split</code> 不保證逐列相同，所以重現的 0.9999 和 DS 回報的“0.9 以上”數字不同、方向一致。也沒做逐一修正每個問題的完整消融實驗。</p>
+      <p><b>數字只對這份合成資料成立</b>：下單當下就拿得到的特徵幾乎沒有訊號，不能用來推論正式環境的模型水準。</p>
+      <p><b>上線端補 0 是推論</b>：看不到線上程式碼。</p></div>
+    <div class="tile bad"><h3>標籤的限制</h3>
+      <p>沒有取消時間欄位，只能用出發日判斷結果確定；出發日已過卻仍是“已付款”“已建立”的訂單依定義標 0。</p>
+      <p class="sub">正式環境若有取消時間，已取消的單可以提早算進歷史；但未取消的單仍要等出發日，兩邊算進歷史的時間不對稱，會讓歷史取消率偏高，要一併處理。另外，有取消時間也是存活分析（第 15 頁）的前提。</p></div>
+  </div>
+  <p class="src">技術細節：<a href="README.md#6-驗證方法與限制">README 6</a>、<a href="README.md#47-已知限制與升級方向">4.7</a>；所有查詢與輸出見 README 附錄 A～G</p>
+</section>
+
+<footer class="end sub">
+  <p>本頁所有數字取自模組 F 的 <a href="README.md">README</a>（正文與附錄），合成資料上的數字都標了“在這份資料上”。圖 1、本頁為單一離線檔案，不連任何外部資源；正文中的兩個來源連結是一般超連結。</p>
+</footer>
+</div>
+
+<div class="player" role="toolbar" aria-label="播放控制">
+  <button type="button" id="prevBtn" aria-label="上一頁">←</button>
+  <span class="pos" id="pos">1 / 19</span>
+  <button type="button" id="nextBtn" aria-label="下一頁">→</button>
+  <button type="button" id="exitBtn">離開播放</button>
+  <span class="theme" role="group" aria-label="主題"><button type="button" data-set-theme="auto" aria-pressed="true">跟隨系統</button><button type="button" data-set-theme="light" aria-pressed="false">淺色</button><button type="button" data-set-theme="dark" aria-pressed="false">深色</button></span>
+</div>
+
+<script>
+(function(){
+  document.documentElement.classList.add('js');
+  var scenes = Array.prototype.slice.call(document.querySelectorAll('.scene'));
+  var body = document.body, cur = 0;
+  var pos = document.getElementById('pos');
+  function show(n){
+    cur = Math.max(0, Math.min(scenes.length - 1, n));
+    scenes.forEach(function(s, i){ s.classList.toggle('active', i === cur); });
+    pos.textContent = (cur + 1) + ' / ' + scenes.length;
+    scenes[cur].scrollTop = 0;
+    if (history.replaceState) history.replaceState(null, '', '#' + scenes[cur].id);
+  }
+  function nearest(){
+    var best = 0, bestD = Infinity;
+    scenes.forEach(function(s, i){ var d = Math.abs(s.getBoundingClientRect().top); if (d < bestD){ bestD = d; best = i; } });
+    return best;
+  }
+  function start(){
+    var n = nearest();
+    body.classList.add('playing'); show(n);
+    if (document.documentElement.requestFullscreen) { document.documentElement.requestFullscreen().catch(function(){}); }
+  }
+  function stop(){
+    body.classList.remove('playing');
+    scenes.forEach(function(s){ s.classList.remove('active'); });
+    if (document.fullscreenElement && document.exitFullscreen) { document.exitFullscreen().catch(function(){}); }
+    scenes[cur].scrollIntoView();
+  }
+  var KEY = 'modf-theme';
+  function applyTheme(t){
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    else { t = 'auto'; document.documentElement.removeAttribute('data-theme'); }
+    try { if (t === 'auto') localStorage.removeItem(KEY); else localStorage.setItem(KEY, t); } catch(e){}
+    document.querySelectorAll('[data-set-theme]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.getAttribute('data-set-theme') === t)); });
+  }
+  var saved = null; try { saved = localStorage.getItem(KEY); } catch(e){}
+  applyTheme(saved);
+  document.querySelectorAll('[data-set-theme]').forEach(function(b){ b.addEventListener('click', function(){ applyTheme(b.getAttribute('data-set-theme')); }); });
+  document.getElementById('playBtn').addEventListener('click', start);
+  document.getElementById('prevBtn').addEventListener('click', function(){ show(cur - 1); });
+  document.getElementById('nextBtn').addEventListener('click', function(){ show(cur + 1); });
+  document.getElementById('exitBtn').addEventListener('click', stop);
+  document.addEventListener('fullscreenchange', function(){ if (!document.fullscreenElement && body.classList.contains('playing')) { stop(); } });
+  document.addEventListener('keydown', function(e){
+    if (!body.classList.contains('playing')) return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); show(cur + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); show(cur - 1); }
+    else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(scenes.length - 1); }
+    else if (e.key === 'Escape') { stop(); }
+  });
+})();
+</script>
+</body>
+</html>
