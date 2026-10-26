@@ -4,6 +4,8 @@
 
 > 本檔、模型說明（`model.md`）與資料品質報告（`data-quality-report.md`）的數字，都是 base → day3 四批跑完的結果；各段輸出以該段標示的執行日期與 commit 為準（§7 冪等證明已於 2026-10-25 以 9f9d415 重跑確認，結論與各表 hash 不變）。
 
+> 給主管的圖解版：[`overview.html`](overview.html)，用瀏覽器開啟（可離線），按「播放」後用鍵盤左右鍵一鏡一鏡看。正本是本檔、`model.md`、`data-quality-report.md`，HTML 只是輔助閱讀，數字都取自這三份文件。
+
 ## 目錄
 
 - [1. 進度](#1-進度)
@@ -97,7 +99,8 @@ part_a/
 │   ├── fact_order.py  一批訂單的處理入口：fact_order、隔離表、對帳；run_all
 │   └── run.py         命令列入口
 ├── tests/             pytest
-└── profiling/         來源資料剖析腳本、品質查詢、冪等證明腳本
+├── profiling/         來源資料剖析腳本、品質查詢、冪等證明腳本
+└── overview.html      給主管的圖解版（單一 HTML，輔助閱讀；正本是 md 文件）
 ```
 
 ## 4. 設計重點
@@ -163,7 +166,7 @@ SparkSession 固定 `spark.sql.session.timeZone=Asia/Taipei`。下單時間有�
 - **A-3 品質問題的處理**（使用者定案，見 process-log）：
   - V1 負數金額：合約擋下，進隔離表（`contract`）。
   - V3 coupon -1.0：代表「未知」，轉成 NULL，訂單照常寫入；轉了幾筆記在對帳（`coupon_nulled_rows`）。
-  - V2 疑似多乘 1,000：照原樣寫入 fact，另外列進人工確認清單 `amount_review`（Delta 表，依 batch_id replaceWhere）。判斷用比值 `amount_twd ÷（產品定價 × 數量）`：正常列落在 0.84～1.29，比值大於 100 的列入清單。fact 的 amount_twd 總和包含這些列（這 40 列約佔 base 金額總和的 28%，見資料品質報告），所以下游在人工確認前要排除清單上的訂單（見「排除待確認清單後的金額總和」）。產品落到 -1 時沒有定價，算不出比值，不列入。
+  - V2 疑似多乘 1,000：照原樣寫入 fact，另外列進人工確認清單 `amount_review`（Delta 表，依 batch_id replaceWhere）。判斷用比值 `amount_twd ÷（產品定價 × 數量）`：正常列落在 0.84～1.28，比值大於 100 的列入清單。fact 的 amount_twd 總和包含這些列（這 40 列約佔 base 金額總和的 28%，見資料品質報告），所以下游在人工確認前要排除清單上的訂單（見「排除待確認清單後的金額總和」）。產品落到 -1 時沒有定價，算不出比值，不列入。
   - coupon 大於 amount_twd（net_amount_twd 為負）：照原樣寫入 fact，同樣列進 `amount_review`（使用者定 B：「太大的可能是全額折抵」）。清單每張單一列，`review_reasons` 記命中的原因，兩種都中時兩個都列。〔防護性設計：本資料 0 筆〕
   - coupon 為 -1 以外的負數：合約擋下，進隔離表（`contract`）。〔防護性設計：本資料 0 筆〕
   - completed 但出發日未到等：只記錄，照原樣寫入。

@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var t=localStorage.getItem("parta-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
+<title>Part A 圖解報告：旅遊訂單資料庫與資料品質</title>
+<!--
+  數字來源：一律取自 HEAD 451d585 已 commit 的文件
+    - LionDEExam/submission/part_a/data-quality-report.md（正文、附錄 C／D／E／F）
+    - LionDEExam/submission/part_a/README.md（三天對帳、冪等證明）
+    - LionDEExam/submission/part_a/model.md（各表列數、會員 M003364 例子）
+  本頁沒有自行推算的新數字；圖的刻度（0、100 億…）只是座標，不是資料。
+  長條寬度是依素材數字等比例畫的（width 百分比 = 素材數字 / 該圖最大值），百分比寬度不顯示在畫面上。
+-->
+<style>
+:root{
+  color-scheme: light;
+  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#6f6d68;
+  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,0.10);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s7:#6250d6;
+  --s1-soft:#cde2fb; --s2-soft:#fbe0d4; --s3-soft:#d2f1e5;
+  --crit:#d03b3b; --good:#0ca30c; --goodtext:#006300;
+  --card:#ffffff;
+}
+/* 主題：預設跟隨系統；data-theme="light"/"dark" 是使用者手動選的（存在 localStorage） */
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#a3a19a;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s7:#9085e9;
+    --s1-soft:#1c3352; --s2-soft:#4a2617; --s3-soft:#13392b;
+    --crit:#e66767; --good:#0ca30c; --goodtext:#0ca30c;
+    --card:#232322;
+  }
+}
+:root[data-theme="dark"]{
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#a3a19a;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s7:#9085e9;
+    --s1-soft:#1c3352; --s2-soft:#4a2617; --s3-soft:#13392b;
+    --crit:#e66767; --good:#0ca30c; --goodtext:#0ca30c;
+    --card:#232322;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--page);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI","PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  line-height:1.65;font-size:16px}
+a{color:var(--s1)}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 20px 80px}
+header.top h1{font-size:1.7rem;margin:.2em 0 .1em;line-height:1.3}
+header.top p{color:var(--ink2);margin:.3em 0}
+.tabnum{font-variant-numeric:tabular-nums}
+
+/* 目錄 */
+nav.toc{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:14px 18px;margin:18px 0 8px}
+nav.toc h2{font-size:1rem;margin:0 0 6px}
+nav.toc ol{margin:0;padding:0;list-style:none;columns:2;column-gap:28px}
+nav.toc li{break-inside:avoid;padding:2px 0;font-size:.95rem}
+nav.toc .n{display:inline-block;min-width:2.2em;color:var(--muted);font-variant-numeric:tabular-nums}
+nav.toc .grp{color:var(--muted);font-size:.8rem;margin-top:6px}
+@media (max-width:640px){nav.toc ol{columns:1}}
+
+.playbar{display:none;gap:8px;align-items:center;margin:10px 0}
+.js .playbar{display:flex}
+button{font:inherit;cursor:pointer;border:1px solid var(--ring);background:var(--surface);color:var(--ink);border-radius:8px;padding:6px 14px}
+button.primary{background:var(--s1);color:#fff;border-color:transparent}
+.hint{color:var(--muted);font-size:.85rem}
+
+/* 分鏡 */
+.scene{background:var(--surface);border:1px solid var(--ring);border-radius:16px;padding:26px 28px 18px;margin:26px 0;
+  display:flex;flex-direction:column;gap:14px;scroll-margin-top:12px}
+.scene > header{display:flex;gap:14px;align-items:baseline}
+.scene .no{font-size:.85rem;font-weight:700;color:#fff;background:var(--ink2);border-radius:6px;padding:2px 8px;font-variant-numeric:tabular-nums;flex:none}
+.scene h2{font-size:1.35rem;margin:0;line-height:1.35}
+.narr{font-size:1.02rem;color:var(--ink);margin:0;max-width:52em}
+.narr b{font-weight:700}
+.src{margin-top:auto;padding-top:8px;border-top:1px dashed var(--grid);font-size:.78rem;color:var(--muted)}
+.src a{color:var(--muted)}
+.fig{margin:0}
+.fig figcaption{font-size:.85rem;color:var(--ink2);margin-top:6px}
+.sub{font-size:.88rem;color:var(--ink2)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.cols3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.cols > *, .cols3 > *, figure{min-width:0}
+@media (max-width:760px){.cols,.cols3{grid-template-columns:1fr}.scene{padding:20px 16px 14px}}
+
+/* 卡片、數字磚 */
+.tile{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:14px 16px}
+.tile .big{font-size:2rem;font-weight:700;line-height:1.15}
+.tile .lbl{font-size:.9rem;color:var(--ink2)}
+.tile h3{margin:0 0 4px;font-size:1rem}
+.tag{display:inline-block;font-size:.75rem;font-weight:600;border-radius:999px;padding:1px 9px;white-space:nowrap;border:1px solid transparent}
+.t-block{background:var(--s2-soft);color:var(--ink);border-color:var(--s2)}
+.t-skip{background:var(--s3-soft);color:var(--ink);border-color:var(--s3)}
+.t-keep{background:var(--s1-soft);color:var(--ink);border-color:var(--s1)}
+.t-log{background:transparent;color:var(--ink2);border-color:var(--axis)}
+.t-tbd{background:transparent;color:var(--crit);border-color:var(--crit)}
+
+/* 一列資料卡片 */
+.rec{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:12px 14px;font-size:.92rem}
+.rec .hd{display:flex;justify-content:space-between;gap:8px;font-weight:700;margin-bottom:6px}
+.rec .hd .from{font-weight:400;color:var(--muted);font-size:.82rem}
+.rec dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0}
+.rec dt{color:var(--muted)}
+.rec dd{margin:0;font-variant-numeric:tabular-nums}
+.rec .bad{color:var(--crit);font-weight:700}
+.rec .bad::before{content:"⚠ ";}
+.rec .diff{background:var(--s2-soft);border-radius:4px;padding:0 4px}
+
+/* 長條（CSS 畫） */
+.bars{display:flex;flex-direction:column;gap:10px}
+.brow{display:grid;grid-template-columns:9.5em 1fr;gap:10px;align-items:center}
+.brow .k{font-size:.9rem;text-align:right;color:var(--ink2)}
+.track{position:relative;height:24px;display:flex;gap:2px;align-items:stretch}
+.seg{height:100%;min-width:3px}
+.seg:last-child{border-radius:0 4px 4px 0}
+.c1{background:var(--s1)} .c2{background:var(--s2)} .c3{background:var(--s3)} .cg{background:var(--axis)}
+.bval{font-size:.85rem;font-variant-numeric:tabular-nums;white-space:nowrap;padding-left:6px;align-self:center;color:var(--ink)}
+@media (max-width:560px){.brow{grid-template-columns:1fr}.brow .k{text-align:left}}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:.85rem;color:var(--ink2)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+
+details.data{font-size:.85rem;color:var(--ink2)}
+details.data summary{cursor:pointer}
+table{border-collapse:collapse;font-size:.88rem;width:100%}
+th{white-space:nowrap}
+th,td{border-bottom:1px solid var(--grid);padding:5px 8px;text-align:left;vertical-align:top}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* 流程 */
+.flow{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.flow li{display:grid;grid-template-columns:3.2em 1fr auto;gap:10px;align-items:center;background:var(--card);border:1px solid var(--ring);border-radius:10px;padding:8px 12px;position:relative;margin-bottom:14px}
+.flow li::after{content:"";position:absolute;left:1.95em;bottom:-14px;height:14px;border-left:2px solid var(--axis)}
+.flow li:last-child::after{display:none}
+.flow .st{font-weight:700;font-size:.9rem;color:var(--ink2);text-align:center}
+.flow .nm{font-weight:600}
+.flow .ds{font-size:.85rem;color:var(--ink2)}
+.flow .out{text-align:right;font-size:.82rem;font-variant-numeric:tabular-nums}
+.flow li.pre{background:transparent;border-style:dashed}
+.flow li.hot{border-color:var(--s2);border-width:2px}
+.flow .divider{font-size:.8rem;color:var(--muted);margin:-4px 0 10px 0;padding-left:.4em}
+@media (max-width:560px){.flow li{grid-template-columns:2.6em 1fr}.flow .out{grid-column:2;text-align:left}}
+
+.quote{border-left:3px solid var(--s7);padding:4px 12px;margin:0;color:var(--ink);font-size:.95rem}
+.quote .who{display:block;color:var(--muted);font-size:.8rem}
+.decide{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:12px 16px}
+.decide h3{margin:0 0 4px;font-size:1rem}
+.decide p{margin:.3em 0}
+
+svg{display:block;width:100%;height:auto;font-family:inherit}
+svg text{fill:var(--ink);font-size:13px}
+svg .mut{fill:var(--muted)}
+svg .ink2{fill:var(--ink2)}
+svg .ln{stroke:var(--axis);stroke-width:2;fill:none}
+svg .grid{stroke:var(--grid);stroke-width:1}
+svg .box{fill:var(--card);stroke:var(--ring);stroke-width:1.5}
+svg .boxc{fill:var(--s1-soft);stroke:var(--s1);stroke-width:2}
+
+.ok{color:var(--goodtext);font-weight:700}
+.chk{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+@media (max-width:760px){.chk{grid-template-columns:1fr 1fr}}
+.chk .tile{padding:10px 12px;font-size:.85rem;min-width:0;overflow-wrap:anywhere}
+.chk .fp{word-break:break-all}
+@media (max-width:480px){.chk{grid-template-columns:1fr}}
+.fp{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem;background:var(--s1-soft);border-radius:4px;padding:0 4px}
+
+.grpcard{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:12px 14px}
+.grpcard h3{margin:0 0 6px;font-size:1rem}
+.grpcard ul{list-style:none;margin:0;padding:0}
+.grpcard li{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:6px 0;border-top:1px solid var(--grid);font-size:.88rem}
+.grpcard li:first-child{border-top:none}
+.grpcard .how{grid-column:1 / -1;color:var(--ink2);font-size:.82rem}
+.grpcard .cnt{font-variant-numeric:tabular-nums;text-align:right;color:var(--ink)}
+
+.guard{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.guard .tile{font-size:.88rem}
+.guard .tile .when{font-weight:600}
+.guard .tile .zero{float:right;font-size:.75rem;color:var(--muted)}
+
+.prin{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.prin .tile h3{font-size:1.05rem}
+.prin .num{display:inline-block;width:1.6em;height:1.6em;border-radius:50%;background:var(--s7);color:#fff;text-align:center;font-weight:700;line-height:1.6em;margin-right:6px;font-size:.85rem}
+
+/* 手機替代版面：寬圖在窄螢幕改用直式 HTML */
+@media (min-width:641px){ .m-only{display:none !important} }
+@media (max-width:640px){ svg.d-only{display:none} }
+.hscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.hscroll svg{min-width:440px}
+.vtl{list-style:none;margin:8px 0 0;padding:0 0 0 18px;border-left:2px solid var(--axis)}
+.vtl li{position:relative;padding:4px 0 12px 8px;font-size:.92rem}
+.vtl li::before{content:"";position:absolute;left:-25px;top:10px;width:12px;height:12px;border-radius:50%;background:var(--axis);border:2px solid var(--surface)}
+.vtl li.x::before{background:var(--crit)} .vtl li.okd::before{background:var(--good)}
+.vtl b{display:block}
+.mlist{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.mlist li{background:var(--card);border:1px solid var(--ring);border-radius:8px;padding:8px 10px;font-size:.92rem}
+.mlist .sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:6px}
+.vbars{display:flex;flex-direction:column;gap:14px}
+.vrow .k{font-size:.92rem;font-weight:600}
+.vrow .track2{display:flex;gap:2px;height:26px;overflow:hidden}
+.vrow .track2 .seg:last-child{border-radius:0 4px 4px 0}
+.vrow .v{font-size:.88rem;font-variant-numeric:tabular-nums;color:var(--ink)}
+/* 業務規則卡（第 4 鏡） */
+.rules{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:760px){.rules{grid-template-columns:1fr}}
+.rule{background:var(--card);border:1px solid var(--ring);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.rule.conflict{border:2px solid var(--crit)}
+.rule .as{font-weight:700;font-size:1rem}
+.rule .as .num{display:inline-block;min-width:1.6em;color:var(--muted);font-variant-numeric:tabular-nums}
+.rule .to{display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:start;font-size:.9rem;background:var(--s1-soft);border-radius:8px;padding:6px 10px}
+.rule .to::before{content:"→ 規則";font-weight:700;font-size:.8rem;white-space:nowrap;padding-top:1px}
+.rule .warn{font-size:.85rem;color:var(--crit);font-weight:600}
+.rule .quote{font-size:.88rem}
+.t-off{background:transparent;color:var(--goodtext);border-color:var(--goodtext)}
+.t-ai{background:transparent;color:var(--s7);border-color:var(--s7)}
+.t-me{background:transparent;color:var(--ink2);border-color:var(--axis)}
+/* 主題切換（需要 JavaScript；沒有 JavaScript 時不顯示，跟隨系統） */
+.theme{display:none;gap:0;border:1px solid var(--ring);border-radius:8px;overflow:hidden}
+.js .theme{display:inline-flex}
+.theme button{border:none;border-radius:0;padding:6px 10px;font-size:.85rem;background:var(--surface);color:var(--ink2)}
+.theme button + button{border-left:1px solid var(--ring)}
+.theme button[aria-pressed="true"]{background:var(--ink);color:var(--surface);font-weight:600}
+.playbar{flex-wrap:wrap}
+.playbar .theme{margin-left:auto}
+/* 播放模式（需要 JavaScript；沒有 JavaScript 時是一般捲動版面） */
+body.playing{overflow:hidden}
+body.playing header.top, body.playing nav.toc, body.playing .playbar, body.playing footer.end{display:none}
+body.playing .wrap{max-width:none;padding:0}
+body.playing .scene{display:none}
+body.playing .scene.active{display:flex;position:fixed;inset:0;margin:0;border-radius:0;border:none;overflow:auto;padding:4vh 6vw 70px}
+body.playing .scene.active > *{max-width:1100px;width:100%;margin-left:auto;margin-right:auto}
+.player{display:none}
+body.playing .player{display:flex;position:fixed;bottom:12px;left:50%;transform:translateX(-50%);gap:8px;align-items:center;z-index:10;
+  background:var(--surface);border:1px solid var(--ring);border-radius:999px;padding:6px 10px;box-shadow:0 2px 10px rgba(0,0,0,.15)}
+@media (max-width:560px){ body.playing .player{flex-wrap:wrap;justify-content:center;width:calc(100% - 16px);border-radius:16px} body.playing .scene.active{padding-bottom:120px} }
+.player .pos{font-variant-numeric:tabular-nums;color:var(--ink2);font-size:.9rem;min-width:4.5em;text-align:center}
+
+/* 列印：每鏡一頁，固定淺色 */
+@media print{
+  :root, :root[data-theme]{color-scheme:light;--page:#fff;--surface:#fff;--ink:#000;--ink2:#333;--muted:#555;--card:#fff;
+    --s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s7:#6250d6;--s1-soft:#cde2fb;--s2-soft:#fbe0d4;--s3-soft:#d2f1e5;--grid:#ddd;--axis:#aaa;--crit:#d03b3b;--goodtext:#006300}
+  body{background:#fff;font-size:12px}
+  .wrap{max-width:none;padding:0}
+  .playbar,.player{display:none !important}
+  nav.toc{page-break-after:always;border:none}
+  .scene{page-break-after:always;break-after:page;border:none;margin:0;padding:6mm 4mm;break-inside:avoid}
+  .scene:last-of-type{page-break-after:auto}
+  details.data{display:none}
+  .seg,.tag,.prin .num,.scene .no,.fp,.rec .diff{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+@media (forced-colors: active){
+  .seg{forced-color-adjust:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <p class="sub">雄獅資訊 資料工程師 Take-Home｜Part A 圖解報告（給主管）</p>
+  <h1>旅遊訂單資料庫：我做了什麼、資料有什麼問題、怎麼處理</h1>
+  <p>這份報告以“分鏡”呈現，一鏡一個重點。可以直接往下捲動閱讀；也可以按“播放”一鏡一畫面，用鍵盤左右鍵切換。</p>
+  <p class="sub"><b>兩個用詞</b>：“寫進資料表”＝寫進給下游報表使用的訂單資料（三天後 112,010 張，<b>含</b>金額多 1,000 倍的 40 張）；“金額指標”＝從資料表算出的金額，<b>人工確認前不含</b>那 40 張。</p>
+  <p class="sub">金額說明：除非另外寫明，金額一律是換算成台幣、<b>折扣前、含所有訂單狀態</b>的加總。Part A 不定義“營收”，營收怎麼算放在 Part C 的指標定義。</p>
+</header>
+
+<div class="playbar">
+  <button class="primary" id="playBtn" type="button">▶ 播放</button>
+  <span class="hint">播放時：← → 切換分鏡，Esc 或“離開播放”離開</span>
+  <span class="theme" role="group" aria-label="主題"><button type="button" data-set-theme="auto" aria-pressed="true">跟隨系統</button><button type="button" data-set-theme="light" aria-pressed="false">淺色</button><button type="button" data-set-theme="dark" aria-pressed="false">深色</button></span>
+</div>
+
+<nav class="toc" aria-label="分鏡目錄">
+  <h2>目錄（17 個分鏡）</h2>
+  <ol>
+    <li class="grp">做了什麼</li>
+    <li><a href="#s1"><span class="n">01</span>題目與成果一句話</a></li>
+    <li><a href="#s2"><span class="n">02</span>原始資料長什麼樣</a></li>
+    <li><a href="#s3"><span class="n">03</span>我把資料整理成什麼</a></li>
+    <li><a href="#s4"><span class="n">04</span>我先定下的業務規則</a></li>
+    <li><a href="#s5"><span class="n">05</span>每天的資料怎麼進來</a></li>
+    <li><a href="#s6"><span class="n">06</span>每一筆資料去了哪裡</a></li>
+    <li><a href="#s7"><span class="n">07</span>重跑不會算錯</a></li>
+    <li class="grp">最重要的 5 個問題</li>
+    <li><a href="#s8"><span class="n">08</span>40 張訂單金額多了 1,000 倍</a></li>
+    <li><a href="#s9"><span class="n">09</span>每天約 600 筆“舊訂單更新”其實是撞號</a></li>
+    <li><a href="#s10"><span class="n">10</span>出發前就標成“已完成”</a></li>
+    <li><a href="#s11"><span class="n">11</span>50 張訂單金額是負數</a></li>
+    <li><a href="#s12"><span class="n">12</span>已取消後又收到較早的“已付款”</a></li>
+    <li class="grp">影響與判斷</li>
+    <li><a href="#s13"><span class="n">13</span>金額的三種看法</a></li>
+    <li><a href="#s14"><span class="n">14</span>其他問題一覽</a></li>
+    <li><a href="#s15"><span class="n">15</span>為正式環境預先準備的處理</a></li>
+    <li><a href="#s16"><span class="n">16</span>我的判斷原則</a></li>
+    <li><a href="#s17"><span class="n">17</span>還不能回答的事與給上游的建議</a></li>
+  </ol>
+</nav>
+
+<!-- ============ 01 ============ -->
+<section class="scene" id="s1" aria-labelledby="h1">
+  <header><span class="no">01</span><h2 id="h1">題目與成果一句話</h2></header>
+  <p class="narr"><b>結論：這份訂單資料可以用來算訂單金額和取消率；其中 40 張金額多了 1,000 倍的訂單照原樣保留在資料裡，但在人工確認之前不計入金額指標。</b></p>
+  <p class="narr">我用 5～6 月的訂單總檔和 7/1～7/3 三天的更新檔，建好一套每天可以重跑、不會算錯的訂單資料庫，並查出會讓金額與取消率算錯的資料問題。</p>
+  <div class="cols3">
+    <div class="tile"><h3>交付物 1｜分析用的資料表</h3><div class="lbl">訂單放中間，旁邊接會員、產品、日期；會員等級的歷史變化保留下來。→ 第 3 鏡</div></div>
+    <div class="tile"><h3>交付物 2｜每天的處理流程</h3><div class="lbl">先載入 5～6 月總檔，再依序處理三天更新檔；同一批重跑、中途當掉再跑，結果都相同。→ 第 5～7 鏡</div></div>
+    <div class="tile"><h3>交付物 3｜資料品質報告</h3><div class="lbl">27 個實際發生的問題，每個都有處理方式或紀錄，附實際查詢。→ 第 8～15 鏡</div></div>
+  </div>
+  <div class="cols3">
+    <div class="tile"><div class="big tabnum">112,010 張</div><div class="lbl">三天後寫進資料表的訂單（含 40 張異常金額）。每一批收到的資料都對得上帳，一筆不漏。</div></div>
+    <div class="tile"><div class="big tabnum" style="font-size:1.6rem">張數 0.04%</div><div class="big tabnum" style="font-size:1.6rem">金額 28.09%</div><div class="lbl">40 張金額多了 1,000 倍的訂單，只佔 5～6 月訂單的 0.04%，卻佔金額的 28.09%。</div></div>
+    <div class="tile"><div class="big tabnum">每天約 600 筆</div><div class="lbl">更新檔裡看起來是“舊訂單的更新”，其實是另一張訂單撞了號。照官方說法處理會算錯會員與取消率。</div></div>
+  </div>
+  <p class="src">技術細節：<a href="data-quality-report.md">A-3 資料品質報告</a> 第 1 節、附錄 C 的問題總數；<a href="README.md">Part A README</a>“三天實跑的對帳”</p>
+</section>
+
+<!-- ============ 02 ============ -->
+<section class="scene" id="s2" aria-labelledby="h2">
+  <header><span class="no">02</span><h2 id="h2">原始資料長什麼樣</h2></header>
+  <p class="narr"><b>題目給了 7 個檔，分成四種資料：訂單、會員、產品、匯率。</b>訂單是主角，分成 5～6 月的總檔（約 10 萬張）和三天的每日更新檔（各 4,615～4,700 列）；另外三種是查對用的參考資料。</p>
+  <div class="cols">
+    <figure class="fig">
+      <div class="bars" role="img" aria-label="四個訂單檔的列數：5～6 月總檔 100,040 列、7/1 更新檔 4,615 列、7/2 更新檔 4,700 列、7/3 更新檔 4,615 列">
+        <div class="brow"><span class="k">5～6 月總檔</span><div class="track"><div class="seg c1" style="width:82%" title="5～6 月總檔：100,040 列（100,000 個訂單編號）"></div><span class="bval">100,040 列</span></div></div>
+        <div class="brow"><span class="k">7/1 更新檔</span><div class="track"><div class="seg c1" style="width:3.77%" title="7/1 更新檔：4,615 列"></div><span class="bval">4,615 列</span></div></div>
+        <div class="brow"><span class="k">7/2 更新檔</span><div class="track"><div class="seg c1" style="width:3.85%" title="7/2 更新檔：4,700 列"></div><span class="bval">4,700 列</span></div></div>
+        <div class="brow"><span class="k">7/3 更新檔</span><div class="track"><div class="seg c1" style="width:3.77%" title="7/3 更新檔：4,615 列"></div><span class="bval">4,615 列</span></div></div>
+      </div>
+      <figcaption>訂單（4 個檔）：每列是一筆訂單紀錄。總檔 100,040 列裡有 100,000 個不同的訂單編號，多出來的是重複送來的列。</figcaption>
+    </figure>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="tile"><h3>會員（1 個檔，三次匯出）</h3><div class="lbl">04-30、05-31、06-30 各匯出一次，分別 8,030／459／502 列，共 8,000 位會員。之後兩次只列有變動或新加入的人。</div></div>
+      <div class="tile"><h3>產品清單（1 個檔）</h3><div class="lbl">300 個產品，只記錄“目前是否上架”。</div></div>
+      <div class="tile"><h3>匯率表（1 個檔）</h3><div class="lbl">134 列，2026-04-28～2026-07-03 的美元、日圓匯率；台幣不列在表上（台幣匯率就是 1）。</div></div>
+    </div>
+  </div>
+  <details class="data"><summary>看數字表</summary>
+    <table><thead><tr><th>檔案</th><th class="num">列數</th><th>說明</th></tr></thead><tbody>
+      <tr><td>5～6 月訂單總檔</td><td class="num">100,040</td><td>100,000 個訂單編號</td></tr>
+      <tr><td>7/1 更新檔</td><td class="num">4,615</td><td></td></tr>
+      <tr><td>7/2 更新檔</td><td class="num">4,700</td><td></td></tr>
+      <tr><td>7/3 更新檔</td><td class="num">4,615</td><td></td></tr>
+      <tr><td>會員</td><td class="num">8,030／459／502</td><td>三次匯出，8,000 位</td></tr>
+      <tr><td>產品清單</td><td class="num">300</td><td></td></tr>
+      <tr><td>匯率表</td><td class="num">134</td><td>美元、日圓</td></tr>
+    </tbody></table>
+  </details>
+  <p class="src">技術細節：A-3 附錄 B 的檔案列數、會員各快照列數、匯率表本身的檢查；<a href="model.md">model.md</a> 各表列數</p>
+</section>
+
+<!-- ============ 03 ============ -->
+<section class="scene" id="s3" aria-labelledby="h3">
+  <header><span class="no">03</span><h2 id="h3">我把資料整理成什麼</h2></header>
+  <p class="narr"><b>訂單放在中間，一張訂單一列、存最新狀態；周圍接上會員、產品、日期三張參考表。</b>這種“中間一張大表、周圍幾張參考表”的排法叫星型模型，查“哪個等級的會員、買了哪類產品、哪天下單”都只要一步就對得到。</p>
+  <div class="cols">
+    <figure class="fig">
+      <svg class="d-only" viewBox="0 0 460 340" role="img" aria-labelledby="starT">
+        <title id="starT">星型模型：訂單表在中間，連到會員、產品、日期三張表</title>
+        <line class="ln" x1="230" y1="170" x2="90" y2="70"/>
+        <line class="ln" x1="230" y1="170" x2="370" y2="70"/>
+        <line class="ln" x1="230" y1="170" x2="230" y2="290"/>
+        <rect class="boxc" x="140" y="128" width="180" height="84" rx="12"/>
+        <text x="230" y="158" text-anchor="middle" style="font-weight:700;font-size:16px">訂單</text>
+        <text x="230" y="180" text-anchor="middle">112,010 張</text>
+        <text x="230" y="200" text-anchor="middle" class="ink2" style="font-size:12px">一張訂單一列、存最新狀態</text>
+        <rect class="box" x="10" y="22" width="160" height="80" rx="10"/>
+        <text x="90" y="48" text-anchor="middle" style="font-weight:700">會員</text>
+        <text x="90" y="68" text-anchor="middle">8,000 位</text>
+        <text x="90" y="88" text-anchor="middle" class="ink2" style="font-size:12px">8,772 個等級版本</text>
+        <rect class="box" x="290" y="22" width="160" height="80" rx="10"/>
+        <text x="370" y="48" text-anchor="middle" style="font-weight:700">產品</text>
+        <text x="370" y="68" text-anchor="middle">300 個</text>
+        <text x="370" y="88" text-anchor="middle" class="ink2" style="font-size:12px">＋“未知產品”1 列</text>
+        <rect class="box" x="150" y="258" width="160" height="70" rx="10"/>
+        <text x="230" y="284" text-anchor="middle" style="font-weight:700">日期</text>
+        <text x="230" y="306" text-anchor="middle">183 天</text>
+        <text x="230" y="322" text-anchor="middle" class="ink2" style="font-size:12px">當下單日，也當出發日</text>
+      </svg>
+      <div class="m-only">
+        <ul class="mlist">
+          <li style="border:2px solid var(--s1);background:var(--s1-soft)"><b>訂單（中間）</b>：112,010 張<br><span class="sub">一張訂單一列、存最新狀態</span></li>
+          <li>↳ 接 <b>會員</b>：8,000 位<br><span class="sub">8,772 個等級版本</span></li>
+          <li>↳ 接 <b>產品</b>：300 個<br><span class="sub">＋“未知產品”1 列</span></li>
+          <li>↳ 接 <b>日期</b>：183 天<br><span class="sub">當下單日，也當出發日</span></li>
+        </ul>
+      </div>
+      <figcaption>對不到產品清單的訂單不丟掉，接到“未知產品”；會員則一定要對得到（對不到就擋下待查）。</figcaption>
+    </figure>
+    <figure class="fig">
+      <svg class="d-only" viewBox="0 0 460 300" role="img" aria-labelledby="scdT">
+        <title id="scdT">會員 M003364 的等級歷史：05-31 以前是金卡，05-31 起是白金；12 張訂單各自對到下單當時的等級</title>
+        <text x="10" y="22" style="font-weight:700">例子：會員 M003364</text>
+        <text x="10" y="42" class="ink2" style="font-size:12px">04-30 匯出時是金卡，05-31 匯出時變白金</text>
+        <!-- 時間軸：05-01 (x=90) 到 07-05 (x=440)，65 天 -->
+        <line class="grid" x1="20" y1="150" x2="445" y2="150"/>
+        <rect x="20" y="96" width="225" height="30" rx="4" fill="var(--s1-soft)" stroke="var(--s1)"/>
+        <text x="30" y="116">金卡（從註冊日 2021-04-03 起）</text>
+        <rect x="247" y="96" width="198" height="30" rx="4" fill="var(--s3-soft)" stroke="var(--s3)"/>
+        <text x="257" y="116">白金（從 05-31 起）</text>
+        <line x1="246" y1="84" x2="246" y2="160" stroke="var(--ink2)" stroke-dasharray="4 3"/>
+        <text x="246" y="78" text-anchor="middle" class="ink2" style="font-size:12px">05-31 匯出看到變化</text>
+        <text x="40" y="170" class="mut" style="font-size:13px" text-anchor="middle">⋯</text>
+        <text x="90" y="170" class="mut" style="font-size:13px" text-anchor="middle">05-01</text>
+        <text x="408" y="170" class="mut" style="font-size:13px" text-anchor="middle">07-01</text>
+        <!-- 訂單點：05-13 x≈155, 05-19 x≈187 -->
+        <circle cx="155" cy="150" r="6" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>05-13 下單：對到金卡</title></circle>
+        <circle cx="187" cy="146" r="6" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>05-19 下單 2 張：對到金卡</title></circle>
+        <circle cx="187" cy="156" r="6" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>05-19 下單 2 張：對到金卡</title></circle>
+        <!-- 06-16～06-30：x 330～408 -->
+        <rect x="327" y="142" width="80" height="16" rx="8" fill="var(--s3)"><title>06-16～06-30 下單 6 張：對到白金</title></rect>
+        <circle cx="412" cy="145" r="5" fill="var(--s3)" stroke="var(--surface)" stroke-width="2"><title>07-02 下單 2 張：對到白金</title></circle>
+        <circle cx="412" cy="155" r="5" fill="var(--s3)" stroke="var(--surface)" stroke-width="2"><title>07-02 下單 2 張：對到白金</title></circle>
+        <circle cx="420" cy="150" r="5" fill="var(--s3)" stroke="var(--surface)" stroke-width="2"><title>07-03 下單 1 張：對到白金</title></circle>
+        <text x="170" y="200" text-anchor="middle" style="font-size:12px">05-13（1 張）、05-19（2 張）</text>
+        <text x="170" y="216" text-anchor="middle" class="ink2" style="font-size:12px">→ 對到金卡</text>
+        <text x="372" y="200" text-anchor="middle" style="font-size:12px">06-16～06-30 共 6 張、</text>
+        <text x="372" y="216" text-anchor="middle" style="font-size:12px">07-02（2 張）、07-03（1 張）</text>
+        <text x="372" y="232" text-anchor="middle" class="ink2" style="font-size:12px">→ 對到白金</text>
+        <text x="10" y="270" class="ink2" style="font-size:12px">新等級從“看到變化的那次匯出日”起算：</text>
+        <text x="10" y="288" class="ink2" style="font-size:12px">資料只告訴我們 05-31 時已經是白金，不知道哪天升級。</text>
+      </svg>
+      <div class="m-only">
+        <p class="sub" style="margin:0"><b>例子：會員 M003364</b><br>04-30 匯出時是金卡，05-31 匯出時變白金</p>
+        <ul class="mlist">
+          <li><span class="sw c1"></span><b>金卡</b>（從註冊日 2021-04-03 起，到 05-31 為止）<br><span class="sub">05-13（1 張）、05-19（2 張）→ 對到金卡</span></li>
+          <li><span class="sw c3"></span><b>白金</b>（從 05-31 起，05-31 匯出時看到變化）<br><span class="sub">06-16～06-30 共 6 張、07-02（2 張）、07-03（1 張）→ 對到白金</span></li>
+        </ul>
+        <p class="sub" style="margin:8px 0 0">新等級從“看到變化的那次匯出日”起算：資料只告訴我們 05-31 時已經是白金，不知道哪天升級。</p>
+      </div>
+      <figcaption>這位會員共 12 張訂單，每張都對到下單當時的等級。全部會員裡有 772 位有兩個版本。</figcaption>
+    </figure>
+  </div>
+  <p class="src">技術細節：<a href="model.md">model.md</a> 第 1～3 節（模型圖、各表、會員歷史規則與 M003364 例子）；ADR-04 訂單表一張訂單一列</p>
+</section>
+
+<!-- ============ 04 ============ -->
+<section class="scene" id="s4" aria-labelledby="h4">
+  <header><span class="no">04</span><h2 id="h4">我先定下的業務規則</h2></header>
+  <p class="narr"><b>題目和官方說明沒交代的業務前提，我先定成明確的規則，處理流程的每個判斷都照這些規則走。</b>下面挑出 8 條最關鍵的：上半是“我假設了什麼”，藍底是“因此流程怎麼處理”。紅框的兩條和資料或官方說法不一致，是主管最該知道的。</p>
+  <div class="legend"><span><span class="tag t-me">作者假設</span> 作者自己的判斷</span><span><span class="tag t-off">官方說明</span> 官方資料說明已寫明，不算假設</span><span><span class="tag t-ai">AI 提出、作者採用</span></span><span><span class="tag t-tbd">⚠ 和資料或官方不一致</span></span></div>
+  <div class="rules">
+    <div class="rule"><div class="as"><span class="num">1</span>訂單狀態只會往前走，取消後不能恢復 <span class="tag t-me">作者假設</span></div>
+      <div class="to">以資料裡記錄的更新時間判斷新舊；狀態往回走就擋下；晚到的較舊狀態不採用（第 12 鏡）。</div>
+      <blockquote class="quote">「那先簡單假設不能恢復」</blockquote></div>
+    <div class="rule"><div class="as"><span class="num">2</span>已完成之後不能再取消 <span class="tag t-me">作者假設</span></div>
+      <div class="to">“已完成 → 已取消”視為不合法、擋下待查（本資料 0 筆，預先防範）。</div>
+      <blockquote class="quote">「先假設completed後不能取消」</blockquote></div>
+    <div class="rule conflict"><div class="as"><span class="num">3</span>“已完成”代表已經出團 <span class="tag t-me">作者假設</span></div>
+      <div class="warn">⚠ 和資料衝突：28,578 張在出發前就標成已完成（第 10 鏡）</div>
+      <div class="to">已完成是訂單的最後一步，第 2 條建立在這上面；衝突的訂單照原樣寫入，只在報告記錄。</div>
+      <blockquote class="quote">「completed先假設成出團完成」；「先把狀態規則定下來 之後比較好處理」</blockquote></div>
+    <div class="rule conflict"><div class="as"><span class="num">4</span>訂單的會員、下單時間、金額不能被修改，只有狀態會變 <span class="tag t-me">作者假設</span></div>
+      <div class="warn">⚠ 和官方說法不同：官方說更新檔含舊訂單的狀態更新（第 9 鏡）</div>
+      <div class="to">同編號但這三項不同的資料是撞號，擋下待查，不覆蓋原本的訂單。</div>
+      <blockquote class="quote">「訂單的基本資訊不能被修改」</blockquote></div>
+    <div class="rule"><div class="as"><span class="num">5</span>沒標時區的時間是台北時間 <span class="tag t-me">作者假設</span></div>
+      <div class="to">下單日、換匯日、會員等級對應，一律用台北日期。</div>
+      <blockquote class="quote">「台北 因為重複列跟時間先後都對得上」</blockquote></div>
+    <div class="rule"><div class="as"><span class="num">6</span>訂單金額是折扣前的金額 <span class="tag t-me">作者假設</span></div>
+      <div class="to">另外算出折扣後金額，兩種都存；資料本身分辨不出來，所以先定義清楚。</div>
+      <blockquote class="quote">「那折扣前」；「我的設計傾向紀錄所有金額」</blockquote></div>
+    <div class="rule"><div class="as"><span class="num">7</span>折扣金額是台幣 <span class="tag t-off">官方說明</span></div>
+      <div class="to">折扣不換匯，直接從台幣金額扣掉。官方欄位說明已寫明，作者另外用資料確認過。</div>
+      <blockquote class="quote">「coupon 當 TWD，三種幣別面額一樣」<span class="who">作者用資料確認時的話</span></blockquote></div>
+    <div class="rule"><div class="as"><span class="num">8</span>同一位會員同一天兩筆，以較高等級為準 <span class="tag t-me">作者假設</span></div>
+      <div class="to">30 位會員的第一個版本取較高等級。證據薄弱，影響只有這 30 位。</div>
+      <blockquote class="quote">「假設會員系統也是同樣的行為才選擇的行為」</blockquote></div>
+  </div>
+  <p class="sub">其他規則見業務假設全文，例如“幣別寫成 NTD 就是台幣”是 <span class="tag t-ai">AI 提出、作者採用</span>，“產品下架了訂單仍要保留”“每張訂單都要對得到會員”是作者假設。</p>
+  <p class="src">技術細節：<a href="../business-assumptions.md">業務假設</a> 1.1、1.2、1.4、2.1、3.1、3.8、4.1、5.1 節，以及第 8 節“和資料衝突、面談最可能被追問的假設”</p>
+</section>
+
+<!-- ============ 05 ============ -->
+<section class="scene" id="s5" aria-labelledby="h5">
+  <header><span class="no">05</span><h2 id="h5">每天的資料怎麼進來</h2></header>
+  <p class="narr"><b>每一批資料依序走過 3 個前置檢查和 8 個處理步驟；哪一步擋下的資料，就帶著那一步的原因存進待查清單。</b>所以每一筆只會落在一個地方，最後加起來一定等於收到的筆數。數字依序是 5～6 月總檔／7/1／7/2／7/3。</p>
+  <div class="legend"><span><span class="tag t-block">擋下待查</span> 不寫進資料表，原樣保留等人處理</span><span><span class="tag t-skip">不採用</span> 較舊的資料，不改變訂單</span><span><span class="tag t-keep">寫入並標記</span> 照常寫進資料表，另外記錄</span></div>
+  <ol class="flow">
+    <li class="pre"><span class="st">前置 A</span><div><div class="nm">檢查這批跑過沒</div><div class="ds">跑過就跳過；檔案被改過就停下</div></div><div class="out">0</div></li>
+    <li class="pre"><span class="st">前置 B</span><div><div class="nm">檢查產品清單、匯率表</div><div class="ds">有壞資料就整批暫停，什麼都不寫</div></div><div class="out">0</div></li>
+    <li class="pre"><span class="st">前置 C</span><div><div class="nm">更新會員、產品資料</div><div class="ds">同一天兩筆的 30 位取較高等級；N/A、1900-01-01 當成空白</div></div><div class="out"><span class="tag t-keep">修正後保留</span></div></li>
+    <li><span class="st">①</span><div><div class="nm">讀進來、檢查格式</div><div class="ds">擋下負數金額；下單時間統一成台北時間</div></div><div class="out"><span class="tag t-block">擋下</span> 50／0／0／0</div></li>
+    <li><span class="st">②</span><div><div class="nm">同一個檔裡兩張單同編號</div><div class="ds">分不出哪張才是原本的單，兩筆都擋下</div></div><div class="out"><span class="tag t-block">擋下</span> 0／6／2／4</div></li>
+    <li><span class="st">③</span><div><div class="nm">同一筆送了兩次</div><div class="ds">留最新一筆</div></div><div class="out"><span class="tag t-block">擋下</span> 40／15／15／15</div></li>
+    <li class="hot"><span class="st">④</span><div><div class="nm">和已經存在的訂單撞號</div><div class="ds">會員、金額、下單時間都不同，不覆蓋原本的訂單（第 9 鏡）</div></div><div class="out"><span class="tag t-block">擋下</span> 0／594／598／596</div></li>
+    <li><span class="st">⑤</span><div><div class="nm">判斷狀態先後</div><div class="ds">以資料裡的更新時間判斷新舊（第 12 鏡）</div></div><div class="out"><span class="tag t-skip">不採用</span> 0／0／25／0</div></li>
+    <li><span class="st">⑥</span><div><div class="nm">換算成台幣</div><div class="ds">幣別寫成 NTD 的 200 張當台幣</div></div><div class="out">0</div></li>
+    <li><span class="st">⑦</span><div><div class="nm">保留給之後的品質規則</div><div class="ds">目前沒有規則</div></div><div class="out">0</div></li>
+    <li class="hot"><span class="st">⑧</span><div><div class="nm">對上會員、產品，算折扣後金額</div><div class="ds">對不到產品的 120 張記為“未知產品”；金額多 1,000 倍的 40 張列進人工確認清單（第 8 鏡）</div></div><div class="out"><span class="tag t-keep">標記</span> 120＋40</div></li>
+    <li class="pre"><span class="st">收尾</span><div><div class="nm">對帳 → 存待查清單 → 存人工確認清單 → 寫進資料表</div><div class="ds">只有更新時間較新的資料才會改掉既有訂單</div></div><div class="out"><span class="ok">✓ 一筆不漏</span></div></li>
+  </ol>
+  <p class="src">技術細節：A-3 附錄 F.1 管線流程與“每一步擋下了什麼”；<a href="README.md">README</a> 6.2 每種狀況的處理</p>
+</section>
+
+<!-- ============ 06 ============ -->
+<section class="scene" id="s6" aria-labelledby="h6">
+  <header><span class="no">06</span><h2 id="h6">每一筆資料去了哪裡</h2></header>
+  <p class="narr"><b>每一批收到的資料 ＝ 寫進資料表 ＋ 擋下待查 ＋ 不採用，四批都對得上，一筆不漏。</b>數字也用另一套查詢獨立重算過，結果相同。更新檔每天約有 615 筆被擋下，幾乎都是撞號。</p>
+  <div class="legend"><span><i class="c1"></i>寫進資料表</span><span><i class="c2"></i>擋下待查</span><span><i class="c3"></i>不採用</span><span class="hint">（每一條各自以該批收到的筆數為全長）</span></div>
+  <figure class="fig">
+    <div class="bars" role="img" aria-label="四批的資料流向，詳見下方數字表">
+      <div class="brow"><span class="k">5～6 月總檔<br><span class="sub">收到 100,040</span></span><div class="track">
+        <div class="seg c1" style="width:calc((100% - 140px) * 0.9991)" title="寫進資料表 99,950"></div><div class="seg c2" style="width:4px" title="擋下待查 90"></div>
+        <span class="bval">99,950｜<b style="color:var(--s2)">90</b>｜0</span></div></div>
+      <div class="brow"><span class="k">7/1 更新檔<br><span class="sub">收到 4,615</span></span><div class="track">
+        <div class="seg c1" style="width:calc((100% - 140px) * 0.8667)" title="寫進資料表 4,000"></div><div class="seg c2" style="width:calc((100% - 140px) * 0.1333)" title="擋下待查 615"></div>
+        <span class="bval">4,000｜<b style="color:var(--s2)">615</b>｜0</span></div></div>
+      <div class="brow"><span class="k">7/2 更新檔<br><span class="sub">收到 4,700</span></span><div class="track">
+        <div class="seg c1" style="width:calc((100% - 140px) * 0.8638)" title="寫進資料表 4,060"></div><div class="seg c2" style="width:calc((100% - 140px) * 0.1309)" title="擋下待查 615"></div><div class="seg c3" style="width:calc((100% - 140px) * 0.0053)" title="不採用 25"></div>
+        <span class="bval">4,060｜<b style="color:var(--s2)">615</b>｜25</span></div></div>
+      <div class="brow"><span class="k">7/3 更新檔<br><span class="sub">收到 4,615</span></span><div class="track">
+        <div class="seg c1" style="width:calc((100% - 140px) * 0.8667)" title="寫進資料表 4,000"></div><div class="seg c2" style="width:calc((100% - 140px) * 0.1333)" title="擋下待查 615"></div>
+        <span class="bval">4,000｜<b style="color:var(--s2)">615</b>｜0</span></div></div>
+    </div>
+    <figcaption>右邊三個數字依序是 寫入｜擋下｜不採用。總檔擋下的 90 筆太少，在圖上只是一條細線。</figcaption>
+  </figure>
+  <div class="cols">
+    <div class="tile"><h3>擋下的原因</h3>
+      <table><thead><tr><th>批次</th><th>擋下</th><th>原因</th></tr></thead><tbody>
+        <tr><td>5～6 月總檔</td><td class="num">90</td><td>負數金額 50、重複送來 40</td></tr>
+        <tr><td>7/1</td><td class="num">615</td><td>和舊訂單撞號 594、同檔撞號 6、重送 15</td></tr>
+        <tr><td>7/2</td><td class="num">615</td><td>和舊訂單撞號 598、同檔撞號 2、重送 15</td></tr>
+        <tr><td>7/3</td><td class="num">615</td><td>和舊訂單撞號 596、同檔撞號 4、重送 15</td></tr>
+      </tbody></table>
+    </div>
+    <div class="tile"><h3>三天後的資料表</h3>
+      <div class="big tabnum">112,010 張</div>
+      <div class="lbl tabnum">＝ 99,950 ＋ 4,000 ＋ 4,060 ＋ 4,000<br>三天寫進來的都是新訂單；沒有任何一筆舊訂單的狀態被改掉（因為“更新”全是撞號）。</div>
+    </div>
+  </div>
+  <details class="data"><summary>看數字表</summary>
+    <table><thead><tr><th>批次</th><th class="num">收到</th><th class="num">寫進資料表</th><th class="num">擋下待查</th><th class="num">不採用</th></tr></thead><tbody>
+      <tr><td>5～6 月總檔</td><td class="num">100,040</td><td class="num">99,950</td><td class="num">90</td><td class="num">0</td></tr>
+      <tr><td>7/1 更新檔</td><td class="num">4,615</td><td class="num">4,000</td><td class="num">615</td><td class="num">0</td></tr>
+      <tr><td>7/2 更新檔</td><td class="num">4,700</td><td class="num">4,060</td><td class="num">615</td><td class="num">25</td></tr>
+      <tr><td>7/3 更新檔</td><td class="num">4,615</td><td class="num">4,000</td><td class="num">615</td><td class="num">0</td></tr>
+    </tbody></table>
+  </details>
+  <p class="src">技術細節：A-3 第 4 節、附錄 C 的對帳說明；<a href="README.md">README</a> 6.2、6.3 三天實跑的對帳（另以獨立的 Python 參考模型比對一致）</p>
+</section>
+
+<!-- ============ 07 ============ -->
+<section class="scene" id="s7" aria-labelledby="h7">
+  <header><span class="no">07</span><h2 id="h7">重跑不會算錯</h2></header>
+  <p class="narr"><b>同一批資料跑兩次、或跑到一半當掉再重跑，結果和只跑一次完全相同。</b>比的不只是筆數和金額，而是七張表整張內容的“指紋”：內容差一個字，指紋就會不同。下圖只列訂單表的指紋，其他六張表的指紋也都相同。圖上的金額是照原樣的總和（折扣前、含所有狀態、含那 40 張）。</p>
+  <div class="tile">
+    <h3>實驗 1：三天的更新檔，各自強制再跑一次</h3>
+    <div class="chk">
+      <div class="tile"><b>第一次跑完</b><br><span class="tabnum">112,010 張</span><br><span class="tabnum">39,086,896,780.27</span><br><span class="sub">照原樣總和（含 40 張）</span><br>指紋 <span class="fp">6c54abe0bd61</span></div>
+      <div class="tile"><b>7/1 再跑一次</b><br><span class="tabnum">112,010 張</span><br><span class="tabnum">39,086,896,780.27</span><br>指紋 <span class="fp">6c54abe0bd61</span> <span class="ok">✓ 相同</span></div>
+      <div class="tile"><b>7/2 再跑一次</b><br><span class="tabnum">112,010 張</span><br><span class="tabnum">39,086,896,780.27</span><br>指紋 <span class="fp">6c54abe0bd61</span> <span class="ok">✓ 相同</span></div>
+      <div class="tile"><b>7/3 再跑一次</b><br><span class="tabnum">112,010 張</span><br><span class="tabnum">39,086,896,780.27</span><br>指紋 <span class="fp">6c54abe0bd61</span> <span class="ok">✓ 相同</span></div>
+    </div>
+  </div>
+  <figure class="fig tile">
+    <h3>實驗 2：處理 7/3 時故意當掉兩次，第三次才跑完</h3>
+    <svg class="d-only" viewBox="0 0 900 190" role="img" aria-labelledby="crashT">
+      <title id="crashT">當掉前 108,010 張；第一次在寫入訂單前當掉，仍是 108,010 張；第二次寫入後、記錄完成前當掉，112,010 張但沒有完成紀錄；第三次完成 112,010 張；和沒當掉的對照組相同</title>
+      <line class="ln" x1="80" y1="70" x2="820" y2="70"/>
+      <g>
+        <circle cx="80" cy="70" r="10" fill="var(--axis)"/>
+        <text x="80" y="38" text-anchor="middle" style="font-weight:700">當掉前</text>
+        <text x="80" y="104" text-anchor="middle">108,010 張</text>
+        <text x="80" y="122" text-anchor="middle" class="ink2" style="font-size:12px">7/2 跑完</text>
+      </g>
+      <g>
+        <text x="265" y="76" text-anchor="middle" style="font-size:22px;fill:var(--crit)">✕</text>
+        <text x="265" y="38" text-anchor="middle" style="font-weight:700">第一次</text>
+        <text x="265" y="104" text-anchor="middle">108,010 張</text>
+        <text x="265" y="122" text-anchor="middle" class="ink2" style="font-size:12px">寫入訂單前當掉</text>
+        <text x="265" y="140" text-anchor="middle" class="ink2" style="font-size:12px">訂單沒有變</text>
+      </g>
+      <g>
+        <text x="450" y="76" text-anchor="middle" style="font-size:22px;fill:var(--crit)">✕</text>
+        <text x="450" y="38" text-anchor="middle" style="font-weight:700">第二次</text>
+        <text x="450" y="104" text-anchor="middle">112,010 張</text>
+        <text x="450" y="122" text-anchor="middle" class="ink2" style="font-size:12px">寫入後、記錄完成前當掉</text>
+        <text x="450" y="140" text-anchor="middle" class="ink2" style="font-size:12px">沒記錄完成 → 下次整批重做</text>
+      </g>
+      <g>
+        <circle cx="635" cy="70" r="10" fill="var(--good)"/>
+        <text x="635" y="38" text-anchor="middle" style="font-weight:700">第三次完成</text>
+        <text x="635" y="104" text-anchor="middle">112,010 張</text>
+        <text x="635" y="122" text-anchor="middle" class="ink2" style="font-size:12px">指紋 6c54abe0bd61</text>
+      </g>
+      <g>
+        <rect x="740" y="56" width="160" height="96" rx="10" class="box"/>
+        <text x="820" y="80" text-anchor="middle" style="font-weight:700">對照：沒當掉</text>
+        <text x="820" y="104" text-anchor="middle">112,010 張</text>
+        <text x="820" y="122" text-anchor="middle" class="ink2" style="font-size:12px">指紋 6c54abe0bd61</text>
+        <text x="820" y="142" text-anchor="middle" style="fill:var(--goodtext);font-weight:700">✓ 完全相同</text>
+      </g>
+    </svg>
+    <ol class="vtl m-only">
+      <li><b>當掉前：108,010 張</b><span class="sub">7/2 跑完</span></li>
+      <li class="x"><b>第一次 ✕ 寫入訂單前當掉</b><span class="sub">108,010 張，訂單沒有變</span></li>
+      <li class="x"><b>第二次 ✕ 寫入後、記錄完成前當掉</b><span class="sub">112,010 張，但沒記錄完成 → 下次整批重做</span></li>
+      <li class="okd"><b>第三次完成：112,010 張</b><span class="sub">指紋 6c54abe0bd61</span></li>
+      <li class="okd"><b>對照（沒當掉）：112,010 張</b><span class="sub">指紋 6c54abe0bd61　<span class="ok">✓ 完全相同</span></span></li>
+    </ol>
+    <figcaption>重做時，系統拿“這批開始之前”的資料狀態來比對，不會把自己上一次寫一半的結果誤當成舊資料。平常重跑已完成的批次則直接跳過。</figcaption>
+  </figure>
+  <p class="src">技術細節：<a href="README.md">README</a> 第 7 節冪等證明（兩個實驗的完整輸出，指紋只顯示前 12 碼）；ADR-05 重跑時比對批次開始前的版本</p>
+</section>
+
+<!-- ============ 08 ============ -->
+<section class="scene" id="s8" aria-labelledby="h8">
+  <header><span class="no">08</span><h2 id="h8">問題 1｜40 張訂單的金額多了 1,000 倍</h2></header>
+  <div class="cols">
+    <div class="rec" aria-label="訂單 ORD00016881">
+      <div class="hd"><span>訂單 ORD00016881</span><span class="from">5～6 月總檔</span></div>
+      <dl>
+        <dt>行程定價</dt><dd>101,000 台幣</dd>
+        <dt>人數</dt><dd>2 人</dd>
+        <dt>訂單金額</dt><dd class="bad">249,563,000 台幣（約 2.5 億）</dd>
+        <dt>除以 1,000</dt><dd>249,563，才是合理價位</dd>
+      </dl>
+    </div>
+    <figure class="fig">
+      <div class="bars" role="img" aria-label="40 張訂單佔 5～6 月訂單數 0.04%，佔金額 28.09%">
+        <div class="brow"><span class="k">佔訂單張數</span><div class="track"><div class="seg c2" style="width:4px" title="0.04%"></div><div class="seg cg" style="width:calc(100% - 70px);opacity:.35"></div><span class="bval"><b>0.04%</b></span></div></div>
+        <div class="brow"><span class="k">佔金額</span><div class="track"><div class="seg c2" style="width:calc((100% - 70px) * 0.2809)" title="28.09%"></div><div class="seg cg" style="width:calc((100% - 70px) * 0.7191);opacity:.35"></div><span class="bval"><b>28.09%</b></span></div></div>
+      </div>
+      <figcaption>0.04% 太小，圖上只畫一條細線（實際比例更細）。範圍：5～6 月總檔寫進資料表的訂單；金額為折扣前、含所有狀態。和除以 1,000 修正後相比，照原樣加總會高估約 39.00%（約四成）。</figcaption>
+    </figure>
+  </div>
+  <figure class="fig">
+    <svg class="d-only" viewBox="0 0 900 96" role="img" aria-labelledby="ratioT">
+      <title id="ratioT">金額除以（定價乘人數）的倍數：正常訂單在 0.84 到 1.28 倍之間，40 張異常訂單在約 1,000 倍，抓取門檻是 100 倍</title>
+      <line class="ln" x1="40" y1="50" x2="860" y2="50"/>
+      <rect x="140" y="38" width="30" height="24" rx="4" fill="var(--s1)"><title>正常訂單：0.84～1.28 倍</title></rect>
+      <text x="155" y="26" text-anchor="middle" style="font-size:12px">正常 0.84～1.28 倍</text>
+      <line x1="560" y1="30" x2="560" y2="70" stroke="var(--ink2)" stroke-dasharray="4 3"/>
+      <text x="560" y="24" text-anchor="middle" class="ink2" style="font-size:12px">門檻：超過 100 倍就列出</text>
+      <circle cx="780" cy="50" r="10" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>40 張：約 1,000 倍</title></circle>
+      <text x="780" y="24" text-anchor="middle" style="font-size:12px">40 張：約 1,000 倍</text>
+      <text x="155" y="88" text-anchor="middle" class="mut" style="font-size:13px">1 倍</text>
+      <text x="560" y="88" text-anchor="middle" class="mut" style="font-size:13px">100 倍</text>
+      <text x="780" y="88" text-anchor="middle" class="mut" style="font-size:13px">1,000 倍</text>
+    </svg>
+    <ul class="mlist m-only">
+      <li><span class="sw c1"></span><b>正常訂單</b>：0.84～1.28 倍</li>
+      <li><span class="sw cg"></span><b>門檻</b>：超過 100 倍就列出</li>
+      <li><span class="sw c2"></span><b>40 張異常</b>：約 1,000 倍</li>
+    </ul>
+    <figcaption>抓法：看“金額 ÷（定價 × 人數）”。兩群相差很遠，所以抓得出來；但原本正確的金額是多少，資料無法自動判斷。（刻度為對數，只示意相對位置）</figcaption>
+  </figure>
+  <div class="decide">
+    <h3>怎麼處理</h3>
+    <p><span class="tag t-keep">照原樣保留＋人工確認清單</span> 不自動改金額；列進人工確認清單等人看過。<b>人工確認之前，這 40 張不計入下游的金額指標。</b></p>
+    <blockquote class="quote">「沒辦法系統性的處理 金額問題我判斷成case by case」<span class="who">作者原話：為什麼不自動除以 1,000</span></blockquote>
+    <blockquote class="quote">「因為已經有前面指標進入隔離我認為就應該人工審查後在進入下流」<span class="who">作者原話：為什麼確認前先不計入金額指標（“隔離”在這裡指列進人工確認清單、人工確認前不計入金額指標；訂單本身仍保留在資料表）</span></blockquote>
+  </div>
+  <p class="src">技術細節：A-3 第 2.1 節、附錄 C-1、附錄 D 的 C-1 兩列</p>
+</section>
+
+<!-- ============ 09 ============ -->
+<section class="scene" id="s9" aria-labelledby="h9">
+  <header><span class="no">09</span><h2 id="h9">問題 2｜每天約 600 筆“舊訂單的更新”，其實是另一張訂單撞了號</h2></header>
+  <div class="cols">
+    <div class="rec"><div class="hd"><span>ORD00005192</span><span class="from">5～6 月總檔</span></div>
+      <dl><dt>會員</dt><dd>M007765</dd><dt>金額</dt><dd>10,230.87 美元</dd><dt>狀態</dt><dd>已付款</dd></dl></div>
+    <div class="rec"><div class="hd"><span>ORD00005192（同一個編號）</span><span class="from">7/1 更新檔</span></div>
+      <dl><dt>會員</dt><dd><span class="diff">M005173</span> ≠</dd><dt>金額</dt><dd><span class="diff">6,927 美元</span> ≠</dd><dt>狀態</dt><dd>已完成</dd><dt>下單時間</dt><dd><span class="diff">也不同</span></dd></dl></div>
+  </div>
+  <p class="narr"><b>題目說更新檔會帶來舊訂單的狀態更新；但三天共 1,808 筆和舊訂單同編號的資料，會員、金額、下單時間三項都相同的是 0 筆。</b>也就是說，這些不是同一張訂單的更新。</p>
+  <figure class="fig">
+    <div class="cols">
+      <div class="bars" role="img" aria-label="如果照官方說法當成更新：1,776 張換成別的會員、763 張變成已取消、118 張已取消的變回有效">
+        <div class="sub" style="font-weight:600">如果照官方說法當成“更新”，會發生</div>
+        <div class="brow"><span class="k">換成別的會員</span><div class="track"><div class="seg c2" style="width:calc((100% - 70px) * 1)" title="1,776 張"></div><span class="bval">1,776 張</span></div></div>
+        <div class="brow"><span class="k">變成已取消</span><div class="track"><div class="seg c2" style="width:calc((100% - 70px) * 0.4296)" title="763 張"></div><span class="bval">763 張</span></div></div>
+        <div class="brow"><span class="k">已取消變回有效</span><div class="track"><div class="seg c2" style="width:calc((100% - 70px) * 0.0664)" title="118 張"></div><span class="bval">118 張</span></div></div>
+      </div>
+      <div class="bars" role="img" aria-label="取消率會從 12.73% 變成 13.31%">
+        <div class="sub" style="font-weight:600">取消率（已取消 ÷ 三天後 112,010 張）</div>
+        <div class="brow"><span class="k">現在的處理</span><div class="track"><div class="seg c1" style="width:calc((100% - 70px) * 0.9564)" title="12.73%"></div><span class="bval">12.73%</span></div></div>
+        <div class="brow"><span class="k">照官方說法</span><div class="track"><div class="seg c2" style="width:calc((100% - 70px) * 1)" title="13.31%"></div><span class="bval">13.31%</span></div></div>
+      </div>
+    </div>
+    <figcaption>客戶分析會整批算錯人，取消率也跟著算錯。</figcaption>
+  </figure>
+  <div class="decide">
+    <h3>怎麼處理</h3>
+    <p><span class="tag t-block">擋下待查</span> 判定為撞號，存進待查清單，不覆蓋原本的訂單。擋下的資料保留原樣，規則改變時可以重新處理。</p>
+    <p class="sub">代價：如果擋下的其實是真的新訂單，是 1,800 張、468,895,127.27 台幣，約佔三天後金額總和的 1.20%。</p>
+    <blockquote class="quote">「把撞號當 noise 處理」；「訂單的基本資訊不能被修改」<span class="who">作者原話（noise＝雜訊；基本資訊指會員、下單時間、金額，狀態可以變）</span></blockquote>
+  </div>
+  <p class="src">技術細節：A-3 第 2.2 節、附錄 C-2；ADR-03 撞號當雜訊處理</p>
+</section>
+
+<!-- ============ 10 ============ -->
+<section class="scene" id="s10" aria-labelledby="h10">
+  <header><span class="no">10</span><h2 id="h10">問題 3｜28,578 張訂單在出發前就被標成“已完成”</h2></header>
+  <div class="cols">
+    <div class="rec"><div class="hd"><span>訂單 ORD00000006</span><span class="from">5～6 月總檔</span></div>
+      <dl><dt>狀態</dt><dd class="bad">已完成</dd><dt>最後一次更新</dt><dd>05-17（這時已經是已完成）</dd><dt>出發日</dt><dd>07-07</dd><dt>相差</dt><dd>還要 51 天才出團</dd></dl></div>
+    <figure class="fig">
+      <div class="hscroll"><svg viewBox="0 0 440 130" role="img" aria-labelledby="depT">
+        <title id="depT">05-17 已標成已完成，出發日是 07-07，相差 51 天</title>
+        <line class="ln" x1="30" y1="60" x2="410" y2="60"/>
+        <rect x="60" y="52" width="320" height="16" rx="4" fill="var(--s2-soft)"/>
+        <circle cx="60" cy="60" r="8" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"/>
+        <text x="60" y="34" text-anchor="middle" style="font-weight:700">05-17</text>
+        <text x="60" y="96" text-anchor="middle" style="font-size:12px">標成“已完成”</text>
+        <rect x="372" y="50" width="16" height="20" fill="var(--s1)"/>
+        <text x="380" y="34" text-anchor="middle" style="font-weight:700">07-07</text>
+        <text x="380" y="96" text-anchor="middle" style="font-size:12px">出發日</text>
+        <text x="220" y="34" text-anchor="middle" class="ink2">還要 51 天</text>
+      </svg></div>
+      <figcaption>28,578 張已完成的訂單全部是這樣，相差 4～119 天。</figcaption>
+    </figure>
+  </div>
+  <figure class="fig">
+    <div class="bars" role="img" aria-label="以 07-01 為基準出發日已過的訂單：已完成 6,147 張、已付款 9,234 張、已建立 3,053 張">
+      <div class="sub" style="font-weight:600">反過來看：以 07-01 為基準，出發日已經過了，狀態卻是…</div>
+      <div class="brow"><span class="k">已完成</span><div class="track"><div class="seg c1" style="width:calc((100% - 80px) * 0.6657)" title="6,147 張"></div><span class="bval">6,147 張</span></div></div>
+      <div class="brow"><span class="k">還是已付款</span><div class="track"><div class="seg c1" style="width:calc((100% - 80px) * 1)" title="9,234 張"></div><span class="bval">9,234 張</span></div></div>
+      <div class="brow"><span class="k">還是已建立</span><div class="track"><div class="seg c1" style="width:calc((100% - 80px) * 0.3306)" title="3,053 張"></div><span class="bval">3,053 張</span></div></div>
+    </div>
+    <figcaption>出發日已過的還掛著已付款、已建立；出發日還沒到的已經是已完成。<b>狀態和出發日在資料裡沒有關聯。</b>（已完成的 6,147 張同樣是在出發前就標上的，不是“到現在都還沒出團”）</figcaption>
+  </figure>
+  <div class="decide">
+    <h3>怎麼處理</h3>
+    <p><span class="tag t-log">照原樣寫入，只記錄</span> 如果把“已完成”當成“已出團”去算出團金額或完成率，數字都不成立；這 28,578 張的金額是 10,324,629,272.48 台幣。<b>看報表時要知道：本資料的已完成不代表已出團。</b></p>
+    <blockquote class="quote">「completed先假設成出團完成」；「先把狀態規則定下來 之後比較好處理」<span class="who">作者原話（completed＝已完成）</span></blockquote>
+  </div>
+  <p class="src">技術細節：A-3 第 2.3 節、附錄 C-3 與“C-3 的基準說明”（已付款、已建立兩個數字的範圍是總檔每張單取最新一筆）</p>
+</section>
+
+<!-- ============ 11 ============ -->
+<section class="scene" id="s11" aria-labelledby="h11">
+  <header><span class="no">11</span><h2 id="h11">問題 4｜50 張訂單的金額是負數</h2></header>
+  <div class="cols">
+    <div class="rec"><div class="hd"><span>訂單 ORD00002319</span><span class="from">5～6 月總檔</span></div>
+      <dl><dt>狀態</dt><dd>已完成</dd><dt>行程定價</dt><dd>63,000 台幣</dd><dt>人數</dt><dd>3 人</dd><dt>訂單金額</dt><dd class="bad">-216,020 台幣</dd><dt>同編號的正數原單</dt><dd>沒有 → 不是“原單＋退款沖銷”</dd></dl></div>
+    <figure class="fig">
+      <div class="bars" role="img" aria-label="50 張負數金額依幣別：台幣 29 張、美元 17 張、日圓 4 張">
+        <div class="sub" style="font-weight:600">50 張負數金額，依幣別</div>
+        <div class="brow"><span class="k">台幣</span><div class="track"><div class="seg c2" style="width:calc((100% - 60px) * 1)" title="29 張"></div><span class="bval">29 張</span></div></div>
+        <div class="brow"><span class="k">美元</span><div class="track"><div class="seg c2" style="width:calc((100% - 60px) * 0.5862)" title="17 張"></div><span class="bval">17 張</span></div></div>
+        <div class="brow"><span class="k">日圓</span><div class="track"><div class="seg c2" style="width:calc((100% - 60px) * 0.1379)" title="4 張"></div><span class="bval">4 張</span></div></div>
+      </div>
+      <figcaption>合計約 -1,239 萬台幣，混進加總會少算；訂單狀態也沒有“退款”這一種，負數解釋不了。</figcaption>
+    </figure>
+  </div>
+  <div class="decide">
+    <h3>怎麼處理</h3>
+    <p><span class="tag t-block">一進來就擋下</span> 資料一進來就檢查，不合格的不收；這 50 張存進待查清單，不寫進資料表。</p>
+    <p class="sub">判斷理由（白話轉述）：負數金額在資料一進來檢查時就該擋下。逐字原話見 A-3 附錄 D 的 C-4。</p>
+  </div>
+  <p class="src">技術細節：A-3 第 2.4 節、附錄 C-4、附錄 F“① 讀取”的幣別分布</p>
+</section>
+
+<!-- ============ 12 ============ -->
+<section class="scene" id="s12" aria-labelledby="h12">
+  <header><span class="no">12</span><h2 id="h12">問題 5｜25 張已取消的訂單，隔天又收到一筆較早的“已付款”</h2></header>
+  <figure class="fig">
+    <svg class="d-only" viewBox="0 0 900 230" role="img" aria-labelledby="lateT">
+      <title id="lateT">訂單 ORD00100020：送到的順序是 7/1 檔的已取消、7/2 檔的已付款；發生的順序是 07-03 12:08 已付款、07-04 18:08 已取消；兩者相反</title>
+      <text x="20" y="24" style="font-weight:700">訂單 ORD00100020</text>
+      <text x="180" y="60" text-anchor="middle" class="ink2" style="font-weight:700">送到的順序</text>
+      <text x="720" y="60" text-anchor="middle" class="ink2" style="font-weight:700">發生的順序</text>
+      <rect x="80" y="80" width="200" height="50" rx="8" fill="var(--s2-soft)" stroke="var(--s2)"/>
+      <text x="180" y="102" text-anchor="middle">① 7/1 檔送來“已取消”</text>
+      <text x="180" y="120" text-anchor="middle" class="ink2" style="font-size:12px">發生在 07-04 18:08</text>
+      <rect x="80" y="150" width="200" height="50" rx="8" fill="var(--s1-soft)" stroke="var(--s1)"/>
+      <text x="180" y="172" text-anchor="middle">② 7/2 檔送來“已付款”</text>
+      <text x="180" y="190" text-anchor="middle" class="ink2" style="font-size:12px">發生在 07-03 12:08</text>
+      <rect x="620" y="80" width="200" height="50" rx="8" fill="var(--s1-soft)" stroke="var(--s1)"/>
+      <text x="720" y="102" text-anchor="middle">① 07-03 12:08 已付款</text>
+      <rect x="620" y="150" width="200" height="50" rx="8" fill="var(--s2-soft)" stroke="var(--s2)"/>
+      <text x="720" y="172" text-anchor="middle">② 07-04 18:08 已取消</text>
+      <text x="720" y="190" text-anchor="middle" style="font-size:12px;font-weight:700">→ 最後維持已取消</text>
+      <line x1="282" y1="105" x2="618" y2="175" stroke="var(--s2)" stroke-width="2"/>
+      <line x1="282" y1="175" x2="618" y2="105" stroke="var(--s1)" stroke-width="2"/>
+      <text x="450" y="92" text-anchor="middle" style="font-weight:700;fill:var(--crit)">⚠ 順序相反</text>
+    </svg>
+    <div class="m-only">
+      <p class="sub" style="margin:0"><b>訂單 ORD00100020</b></p>
+      <p class="sub" style="margin:6px 0 0;font-weight:700">送到的順序</p>
+      <ul class="mlist">
+        <li><span class="sw c2"></span>① 7/1 檔送來“已取消”<br><span class="sub">發生在 07-04 18:08</span></li>
+        <li><span class="sw c1"></span>② 7/2 檔送來“已付款”<br><span class="sub">發生在 07-03 12:08</span></li>
+      </ul>
+      <p class="sub" style="margin:10px 0 0;font-weight:700">發生的順序 <span style="color:var(--crit)">⚠ 和送到的順序相反</span></p>
+      <ul class="mlist">
+        <li><span class="sw c1"></span>① 07-03 12:08 已付款</li>
+        <li><span class="sw c2"></span>② 07-04 18:08 已取消 → <b>最後維持已取消</b></li>
+      </ul>
+    </div>
+  </figure>
+  <div class="cols">
+    <div class="tile"><div class="big tabnum">25 張</div><div class="lbl">如果照送到的順序處理，這 25 張會從已取消變回已付款，<b>6,154,857.49 台幣</b>會被當成有效訂單，取消率也跟著算錯。</div></div>
+    <div class="decide">
+      <h3>怎麼處理</h3>
+      <p><span class="tag t-skip">不採用</span> 以資料裡記錄的更新時間判斷新舊；較舊的那筆不採用（原樣留存備查），訂單維持已取消。符合“訂單狀態只會往前走”的假設。</p>
+      <blockquote class="quote">「晚到事件不該當成狀態轉移」<span class="who">作者原話</span></blockquote>
+    </div>
+  </div>
+  <p class="sub">為什麼 7/1 的檔會有 07-04 的事件：更新檔裡的資料時間常常晚於檔名日期（每天約七成，最多晚 4 天，見第 14 鏡），所以判斷新舊只看資料裡記錄的時間。</p>
+  <p class="src">技術細節：A-3 第 2.5 節、附錄 C-5；業務假設 1.1 訂單流程單向</p>
+</section>
+
+<!-- ============ 13 ============ -->
+<section class="scene" id="s13" aria-labelledby="h13">
+  <header><span class="no">13</span><h2 id="h13">金額的三種看法</h2></header>
+  <p class="narr"><b>40 張多 1,000 倍的訂單，決定了 5～6 月金額是 360 億還是 259 億。</b>把它們直接排除，和假設它們都除以 1,000，只差約 1,010 萬台幣；所以確認之前先排除，對 5～6 月金額的影響很小。</p>
+  <figure class="fig">
+    <div class="legend"><span><i class="c1"></i>其他訂單</span><span><i class="c2"></i>金額多 1,000 倍的 40 張</span></div>
+    <div class="vbars" role="img" aria-label="5～6 月總檔寫進資料表的金額：照原樣 35,969,473,520.09，其中 40 張佔 28.09%；排除 40 張 25,866,981,830.39；40 張除以 1,000 為 25,877,084,322.08">
+      <div class="vrow"><div class="k">照原樣</div>
+        <div class="track2"><div class="seg c1" style="width:calc(71.91% - 2px)" title="其他訂單：25,866,981,830.39 台幣"></div><div class="seg c2" style="width:28.09%" title="40 張：佔照原樣金額的 28.09%"></div></div>
+        <div class="v">35,969,473,520.09 台幣　<b style="color:var(--crit)">其中 40 張佔 28.09%</b></div></div>
+      <div class="vrow"><div class="k">排除 40 張</div>
+        <div class="track2"><div class="seg c1" style="width:71.91%" title="排除 40 張：25,866,981,830.39 台幣"></div></div>
+        <div class="v">25,866,981,830.39 台幣</div></div>
+      <div class="vrow"><div class="k">40 張除以 1,000（估計）</div>
+        <div class="track2"><div class="seg c1" style="width:calc(71.91% - 2px)" title="其他訂單：25,866,981,830.39 台幣"></div><div class="seg c2" style="width:3px" title="40 張除以 1,000 後約 1,010 萬台幣"></div></div>
+        <div class="v">25,877,084,322.08 台幣　<span class="sub">40 張除以 1,000 後只剩約 1,010 萬，圖上是一條細線</span></div></div>
+    </div>
+    <p class="sub" style="margin:8px 0 0;color:var(--crit);font-weight:700">照原樣比除以 1,000 修正後高估約 39.00%（約四成）。</p>
+    <figcaption>範圍：5～6 月總檔寫進資料表的訂單，折扣前、含所有狀態。“除以 1,000”是假設 40 張全部多乘了 1,000 的估計，實際要等人工確認；這個估計的月拆分是 5 月 13,052,417,554.32、6 月 12,824,666,767.76。</figcaption>
+  </figure>
+  <div class="cols">
+    <div class="tile"><h3>三天後全部訂單</h3><div class="lbl tabnum">照原樣 39,086,896,780.27<br>排除 40 張 28,984,405,090.57<br>差額 10,102,491,689.70</div></div>
+    <div class="tile"><h3>人工確認之前</h3><div class="lbl">下游的金額指標以“排除 40 張”為準。這不是營收的定義；營收要不要含已取消、用折扣前還是折扣後，由 Part C 的指標定義決定。</div></div>
+  </div>
+  <details class="data"><summary>看數字表</summary>
+    <table><thead><tr><th>看法</th><th class="num">5～6 月（台幣）</th></tr></thead><tbody>
+      <tr><td>照原樣</td><td class="num">35,969,473,520.09</td></tr>
+      <tr><td>排除 40 張</td><td class="num">25,866,981,830.39</td></tr>
+      <tr><td>40 張除以 1,000（估計）</td><td class="num">25,877,084,322.08</td></tr>
+      <tr><td>排除 vs 除以 1,000 的差</td><td class="num">10,102,491.69</td></tr>
+    </tbody></table>
+  </details>
+  <!-- “360 億”“259 億”是 35,969,473,520.09 與 25,866,981,830.39 / 25,877,084,322.08 四捨五入到億 -->
+  <p class="src">技術細節：A-3 第 1 節、第 2.1 節、附錄 C-1；<a href="README.md">README</a> 4.8 排除待確認清單後的金額總和</p>
+</section>
+
+<!-- ============ 14 ============ -->
+<section class="scene" id="s14" aria-labelledby="h14">
+  <header><span class="no">14</span><h2 id="h14">其他問題一覽</h2></header>
+  <p class="narr"><b>其餘 22 個問題依主題分成五組，大多不影響金額總數，但看報表時要知道。</b>標籤是處理方式：有的擋下，有的修正後照常寫入，有的照原樣寫入、只在報告裡記錄。</p>
+  <!-- 22 = 27 個實際發生的問題 − 第 8～12 鏡的 5 個 -->
+  <div class="legend"><span><span class="tag t-block">橘色＝擋下</span> 不寫進資料表</span><span><span class="tag t-keep">藍色＝有處理後寫入</span> 包含修正、統一、定義（資料看不出來時先講定規則，例如金額一律當折扣前）、去重、保留歷史、不重複存</span><span><span class="tag t-log">灰框＝只記錄</span> 照原樣寫入，只在報告說明</span></div>
+  <div class="cols">
+    <div class="grpcard"><h3>金額與折扣</h3><ul>
+      <li><span>折扣欄寫 -1（代表不知道）</span><span class="cnt">300 筆</span><span class="how"><span class="tag t-keep">修正</span> 折扣改空白、訂單照常寫入，不猜折扣值</span></li>
+      <li><span>金額是折扣前還是後，看不出來</span><span class="cnt">全部</span><span class="how"><span class="tag t-keep">定義</span> 定義為折扣前，另外提供折扣後金額</span></li>
+      <li><span>折扣欄位沒有幣別</span><span class="cnt">全部</span><span class="how"><span class="tag t-keep">定義</span> 一律當台幣（官方說明＋資料吻合）</span></li>
+      <li><span>日圓金額帶小數</span><span class="cnt">80 筆</span><span class="how"><span class="tag t-log">只記錄</span> 金額大小正常</span></li>
+    </ul></div>
+    <div class="grpcard"><h3>訂單狀態與時間</h3><ul>
+      <li><span>下單時間有三種寫法</span><span class="cnt">6,002 筆</span><span class="how"><span class="tag t-keep">統一</span> 換算成台北時間；其中 1,003 筆直接讀字面日期會差一天</span></li>
+      <li><span>6 月的訂單 7/2 才送到</span><span class="cnt">60 張</span><span class="how"><span class="tag t-keep">寫入</span> 照下單日算進 6 月（約 1,132 萬台幣）</span></li>
+      <li><span>更新檔的資料時間晚於檔名日期</span><span class="cnt">每天約七成</span><span class="how"><span class="tag t-log">只記錄</span> 判斷新舊只看資料裡的時間</span></li>
+      <li><span>5～6 月總檔有 7 月的更新時間</span><span class="cnt">2,265 筆</span><span class="how"><span class="tag t-log">只記錄</span> 代表總檔是 7/3 之後才匯出</span></li>
+    </ul></div>
+    <div class="grpcard"><h3>訂單編號與重複</h3><ul>
+      <li><span>同一天的檔裡兩張單同編號</span><span class="cnt">6 組 12 筆</span><span class="how"><span class="tag t-block">擋下</span> 分不出哪一張才是原本的單</span></li>
+      <li><span>總檔同一筆送兩次，只差幾秒</span><span class="cnt">40 組</span><span class="how"><span class="tag t-keep">去重</span> 留最新一筆</span></li>
+      <li><span>更新檔同一筆重送</span><span class="cnt">每天 15 組</span><span class="how"><span class="tag t-keep">去重</span> 留最新一筆</span></li>
+    </ul></div>
+    <div class="grpcard"><h3>產品與匯率</h3><ul>
+      <li><span>訂單的產品不在產品清單</span><span class="cnt">120 張</span><span class="how"><span class="tag t-keep">寫入</span> 記為“未知產品”，保留原本的產品編號</span></li>
+      <li><span>訂單的產品已下架</span><span class="cnt">4,747 張</span><span class="how"><span class="tag t-log">只記錄</span> 清單只有“目前是否上架”</span></li>
+      <li><span>同一個產品名稱對應多個編號</span><span class="cnt">44 個名稱</span><span class="how"><span class="tag t-log">只記錄</span> 用名稱分組時要注意</span></li>
+      <li><span>幣別寫成 NTD</span><span class="cnt">200 張</span><span class="how"><span class="tag t-keep">統一</span> 當台幣計算（54,561,733 台幣），原本寫法保留</span></li>
+    </ul></div>
+    <div class="grpcard" style="grid-column:1 / -1"><h3>會員資料</h3><ul>
+      <li><span>同一位會員同一天兩筆、等級不同</span><span class="cnt">30 位</span><span class="how"><span class="tag t-keep">修正</span> 取較高等級（假設會員系統也這樣運作）</span></li>
+      <li><span>城市寫 N/A／生日寫 1900-01-01</span><span class="cnt">70 人／80 人</span><span class="how"><span class="tag t-keep">修正</span> 當成空白，不蓋掉已知的真實值</span></li>
+      <li><span>真實生日後來被 1900-01-01 蓋掉</span><span class="cnt">5 人</span><span class="how"><span class="tag t-keep">修正</span> 保留真實生日</span></li>
+      <li><span>等級、城市在三次匯出之間改變</span><span class="cnt">等級 434 人、城市 376 人</span><span class="how"><span class="tag t-keep">保留歷史</span> 訂單對到下單當時的等級（第 3 鏡）</span></li>
+      <li><span>後一次匯出和前一次完全一樣</span><span class="cnt">95 筆、91 筆</span><span class="how"><span class="tag t-keep">不重複存</span> 內容沒變就不另存一份歷史</span></li>
+      <li><span>註冊時未滿 18 歲</span><span class="cnt">398 人</span><span class="how"><span class="tag t-log">只記錄</span> 可能是家庭成員或未成年帳號</span></li>
+    </ul></div>
+  </div>
+  <p class="sub">另外：匯率表本來就不列台幣，這是常見設計，<b>不是錯誤</b>，台幣匯率固定為 1。</p>
+  <p class="src">技術細節：A-3 第 3 節、附錄 C-6～C-28</p>
+</section>
+
+<!-- ============ 15 ============ -->
+<section class="scene" id="s15" aria-labelledby="h15">
+  <header><span class="no">15</span><h2 id="h15">為正式環境預先準備的處理</h2></header>
+  <p class="narr"><b>本資料沒有發生、但正式環境可能遇到的狀況，也先寫好處理方式：17 項和資料內容有關、3 項和重跑有關，都已寫進程式。</b>三天實跑時每一項都是 0 筆，下面每張卡片右上角的“0 筆”就是實跑結果。</p>
+  <div class="guard">
+    <div class="tile"><span class="zero">0 筆</span><div class="when">產品清單或匯率表有壞資料</div><span class="tag t-block">整批暫停</span> 什麼都不寫</div>
+    <div class="tile"><span class="zero">0 筆</span><div class="when">已跑完的批次，訂單檔後來被改過</div><span class="tag t-block">停下</span> 要強制重跑，並留下紀錄</div>
+    <div class="tile"><span class="zero">0 筆</span><div class="when">會員資料晚到（5 月的比 6 月晚送）</div><span class="tag t-keep">依序處理</span> 前一批沒完成就不跑下一批</div>
+    <div class="tile"><span class="zero">0 筆</span><div class="when">會員資料本身有壞資料</div><span class="tag t-block">另存待查</span> 不蓋掉這位會員上一次的正確資料</div>
+    <div class="tile"><span class="zero">0 筆</span><div class="when">檔案不見、欄位不對、空檔</div><span class="tag t-block">整批停</span> 單列格式錯則擋下待查</div>
+    <div class="tile"><span class="zero">0 筆</span><div class="when">狀態往回走（已取消又變已付款）</div><span class="tag t-block">擋下</span> 訂單不更新</div>
+    <div class="tile"><span class="zero">0 筆</span><div class="when">同一張單、同一秒出現兩種狀態</div><span class="tag t-block">擋下</span> 排不出先後，不讓系統猜</div>
+    <div class="tile"><span class="zero">0 筆</span><div class="when">下單當天找不到匯率</div><span class="tag t-block">擋下</span> 不拿前一天的匯率代替</div>
+    <div class="tile"><span class="zero">0 筆</span><div class="when">訂單對不到會員</div><span class="tag t-block">擋下</span> 發出錯誤提醒，修正處理流程</div>
+    <div class="tile"><span class="zero">0 筆</span><div class="when">折扣比金額還大</div><span class="tag t-keep">人工確認清單</span> 負的折扣則直接擋下</div>
+    <div class="tile"><span class="zero">0 筆</span><div class="when">跳過中間狀態（已建立直接到已完成）</div><span class="tag t-keep">照常寫入</span> 只計數</div>
+    <div class="tile"><span class="zero">—</span><div class="when">有人繞過處理流程直接寫入</div><span class="tag t-block">資料表最後一道檢查</span> 也擋得住</div>
+  </div>
+  <blockquote class="quote">「晚一點進來比錯的資料好」；「匯率影響的是訂單金額 這個程度比較大 需要事先停止」<span class="who">作者原話：為什麼參考資料一有壞資料就整批暫停</span></blockquote>
+  <p class="src">技術細節：A-3 第 5 節、附錄 E 防護性設計清單（上面挑 12 項代表，完整 21 項含最後一道檢查）</p>
+</section>
+
+<!-- ============ 16 ============ -->
+<section class="scene" id="s16" aria-labelledby="h16">
+  <header><span class="no">16</span><h2 id="h16">我的判斷原則</h2></header>
+  <p class="narr"><b>上面每一個處理方式，背後都是這五條原則之一。</b>每條附上我在討論中說的原話（逐字，出自 AI 協作紀錄）。</p>
+  <div class="prin">
+    <div class="tile"><h3><span class="num">1</span>資料不夠時，不讓系統自己猜</h3>
+      <blockquote class="quote">「資料不足時不要讓管線自己猜」</blockquote>
+      <p class="sub">例：同一秒兩種狀態、找不到匯率 → 擋下，不拿前一天的匯率；折扣寫 -1 → 不猜折扣值。</p></div>
+    <div class="tile"><h3><span class="num">2</span>寧可晚一點，也不要錯的資料</h3>
+      <blockquote class="quote">「晚一點進來比錯的資料好」</blockquote>
+      <p class="sub">例：產品清單、匯率表有壞資料 → 整批暫停；40 張異常金額 → 人工確認前不計入金額指標。</p></div>
+    <div class="tile"><h3><span class="num">3</span>只記錄確定知道的事</h3>
+      <blockquote class="quote">「只記錄確定知道的事」</blockquote>
+      <p class="sub">例：會員新等級從“看到變化的那次匯出日”起算，不猜實際升級日。</p></div>
+    <div class="tile"><h3><span class="num">4</span>不確定的值，不能蓋掉確定的值</h3>
+      <blockquote class="quote">「假值不能蓋真值」；「訂單的基本資訊不能被修改」</blockquote>
+      <p class="sub">例：N/A、1900-01-01 不蓋掉真實城市與生日；撞號的資料不覆蓋原本的訂單。</p></div>
+    <div class="tile"><h3><span class="num">5</span>不是每個問題都要處理，但都要記下來</h3>
+      <blockquote class="quote">「有些問題可以只記錄下來 不需要特別處理」</blockquote>
+      <p class="sub">例：出發前就標已完成、產品已下架、同名不同編號 → 照原樣寫入，在報告裡說明。</p></div>
+  </div>
+  <p class="src">技術細節：A-3 附錄 D 決策與原話對照（每條原話的出處是 ai-collab/process-log.md 的事件標題）</p>
+</section>
+
+<!-- ============ 17 ============ -->
+<section class="scene" id="s17" aria-labelledby="h17">
+  <header><span class="no">17</span><h2 id="h17">還不能從資料回答的事與給上游的建議</h2></header>
+  <div class="cols3">
+    <div class="tile"><h3>資料本身看不到的事</h3>
+      <ul class="sub" style="padding-left:1.1em;margin:0">
+        <li>會員資料每月只匯出一次，看不到實際變動日；變動日到匯出日之間的訂單會對到舊等級。</li>
+        <li>訂單狀態只看得到被送來的那幾次，中間狀態可能沒送來。</li>
+        <li>時間只到秒，同一秒兩種狀態排不出先後。</li>
+        <li>訂單編號不能推時間，也不保證唯一。</li>
+        <li>異常金額靠“金額 ÷ 定價”抓：沒有定價的 120 張無法檢查；若業務允許整單折價或加購，規則就太嚴。</li>
+      </ul></div>
+    <div class="tile"><h3>給上游的建議</h3>
+      <ul class="sub" style="padding-left:1.1em;margin:0">
+        <li>會員資料加上變動時間，或另建等級異動紀錄。</li>
+        <li>確認訂單編號怎麼產生、會不會重用；確認更新檔到底是不是舊訂單的更新。</li>
+        <li>寫入端防止同一筆重送。</li>
+        <li>不知道的值用空白，不用 -1、N/A、1900-01-01 這類代號。</li>
+        <li>時間一律帶時區；幣別用國際標準代碼。</li>
+        <li>金額多 1,000 倍的 40 張，請上游查來源（例如單位換算）。</li>
+      </ul></div>
+    <div class="tile"><h3>主管可能會問</h3>
+      <p class="sub">這三題需要決定權責或流程，資料只能提供數字，<b>答案待決定</b>。</p>
+    </div>
+  </div>
+  <div class="cols3">
+    <div class="decide"><h3>40 張由誰確認、多久確認完？ <span class="tag t-tbd">〔待決定〕</span></h3>
+      <p class="sub">已知：三天後金額照原樣與排除 40 張相差 10,102,491,689.70 台幣。5～6 月“先排除”和“除以 1,000”只差 10,102,491.69 台幣，所以確認前先排除的影響很小。</p></div>
+    <div class="decide"><h3>月報什麼時候結算？ <span class="tag t-tbd">〔待決定〕</span></h3>
+      <p class="sub">已知：6 月的金額在 7/2 因晚到的 60 張多了 11,320,587.24 台幣（約 0.07%）；7/1、7/3 沒變。只有三天資料，看不出之後還會不會有 6 月的訂單晚到。</p></div>
+    <div class="decide"><h3>撞號要不要向上游確認？ <span class="tag t-tbd">〔待決定〕</span></h3>
+      <p class="sub">已知：擋下的若其實是真的新訂單，是 1,800 張、468,895,127.27 台幣，約佔三天後金額的 1.20%（以排除 40 張後的總額為分母約 1.62%）；其中未取消的 238,270,742.17 台幣。</p></div>
+  </div>
+  <p class="src">技術細節：A-3 第 7、8 節（完整建議見附錄 F“上游改善建議”）、第 2.1、2.2 節、第 3.2 節“6 月的金額之後會變多少”</p>
+</section>
+
+<footer class="end sub">
+  <p>本頁所有數字取自 Part A 已提交的文件（資料品質報告、README、模型說明），每個數字都實際查過資料。本頁為單一離線檔案，不連任何外部資源。</p>
+</footer>
+</div>
+
+<div class="player" role="toolbar" aria-label="播放控制">
+  <button type="button" id="prevBtn" aria-label="上一鏡">←</button>
+  <span class="pos" id="pos">1 / 17</span>
+  <button type="button" id="nextBtn" aria-label="下一鏡">→</button>
+  <button type="button" id="exitBtn">離開播放</button>
+  <span class="theme" role="group" aria-label="主題"><button type="button" data-set-theme="auto" aria-pressed="true">跟隨系統</button><button type="button" data-set-theme="light" aria-pressed="false">淺色</button><button type="button" data-set-theme="dark" aria-pressed="false">深色</button></span>
+</div>
+
+<script>
+(function(){
+  document.documentElement.classList.add('js');
+  var scenes = Array.prototype.slice.call(document.querySelectorAll('.scene'));
+  var body = document.body, cur = 0;
+  var pos = document.getElementById('pos');
+  function show(n){
+    cur = Math.max(0, Math.min(scenes.length - 1, n));
+    scenes.forEach(function(s, i){ s.classList.toggle('active', i === cur); });
+    pos.textContent = (cur + 1) + ' / ' + scenes.length;
+    scenes[cur].scrollTop = 0;
+    if (history.replaceState) history.replaceState(null, '', '#' + scenes[cur].id);
+  }
+  function nearest(){
+    var best = 0, bestD = Infinity;
+    scenes.forEach(function(s, i){ var d = Math.abs(s.getBoundingClientRect().top); if (d < bestD){ bestD = d; best = i; } });
+    return best;
+  }
+  function start(){
+    var n = nearest();
+    body.classList.add('playing'); show(n);
+    if (document.documentElement.requestFullscreen) { document.documentElement.requestFullscreen().catch(function(){}); }
+  }
+  function stop(){
+    body.classList.remove('playing');
+    scenes.forEach(function(s){ s.classList.remove('active'); });
+    if (document.fullscreenElement && document.exitFullscreen) { document.exitFullscreen().catch(function(){}); }
+    scenes[cur].scrollIntoView();
+  }
+  var KEY = 'parta-theme';
+  function applyTheme(t){
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    else { t = 'auto'; document.documentElement.removeAttribute('data-theme'); }
+    try { if (t === 'auto') localStorage.removeItem(KEY); else localStorage.setItem(KEY, t); } catch(e){}
+    document.querySelectorAll('[data-set-theme]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.getAttribute('data-set-theme') === t)); });
+  }
+  var saved = null; try { saved = localStorage.getItem(KEY); } catch(e){}
+  applyTheme(saved);
+  document.querySelectorAll('[data-set-theme]').forEach(function(b){ b.addEventListener('click', function(){ applyTheme(b.getAttribute('data-set-theme')); }); });
+  document.getElementById('playBtn').addEventListener('click', start);
+  document.getElementById('prevBtn').addEventListener('click', function(){ show(cur - 1); });
+  document.getElementById('nextBtn').addEventListener('click', function(){ show(cur + 1); });
+  document.getElementById('exitBtn').addEventListener('click', stop);
+  document.addEventListener('fullscreenchange', function(){ if (!document.fullscreenElement && body.classList.contains('playing')) { stop(); } });
+  document.addEventListener('keydown', function(e){
+    if (!body.classList.contains('playing')) return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); show(cur + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); show(cur - 1); }
+    else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(scenes.length - 1); }
+    else if (e.key === 'Escape') { stop(); }
+  });
+})();
+</script>
+</body>
+</html>
