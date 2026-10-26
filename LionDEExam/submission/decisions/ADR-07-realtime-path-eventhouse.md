@@ -1,7 +1,7 @@
 # ADR-07｜即時鏈路：Eventstream → Eventhouse → Real-Time Dashboard
 - 狀態：已定案（2026-10-26，使用者指示 AI 代改：「你幫我」）
 - Part：C
-- 關聯：process-log 事件待使用者確認後由主 session 建立；素材見 `notes/part_c/tentative-decisions.md`「Q4」「Q5」
+- 關聯：process-log「Q4 即時鏈路用 Eventhouse」「業務知識不足的題目採用 AI 建議」（Q5）；素材見 `notes/part_c/tentative-decisions.md`「Q4」「Q5」
 
 ## 背景
 題目要求「訂單事件的準即時儀表板（分鐘級）」。Part A 只有每日批次，**即時鏈路在 Part A 沒有任何證據**（`part-a-evidence.md` E21），是全新設計。

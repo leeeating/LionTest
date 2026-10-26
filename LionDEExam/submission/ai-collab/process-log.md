@@ -822,3 +822,68 @@ AI 的錯：兩次把「HTML」理解成換格式，沒有先查 repo 既有的 
 驗收期間，使用者說：「不要用分境去稱呼」。report.html 與 README 連結裡的「分鏡／第 N 鏡」全部改成「頁／第 N 頁」，用「頁」而不用「節」，是為了避免和 README 的章節編號混淆。圖 1、圖 2 已併入 report.html，使用者決定刪除 `diagrams.html`（「刪除」），report.html 裡指向它的連結一併移除。
 
 - 依據：`module_x/report.html`、`module_x/README.md` 4.8（5b767cf）
+
+## 第五部分：Part C 架構設計
+
+範圍：題目 Part C（Fabric 架構圖、關鍵取捨、Text-to-SQL 配套、歸屬標註）。由另一個 session（`491f7702`）依 `.claude/work/part-c-kickoff.md` 開工；詳細時間軸在 `notes/part_c/process.md`，各題選項與原話在 `notes/part_c/tentative-decisions.md`。
+
+### 2026-10-19｜Part C｜使用者不在場，AI 先做第一版並派 agent 審查
+使用者去運動前交代：「妳先使用herdr開另一個session來作part c 妳先做出一版並利用其他agent來review 不過你在做時需要紀錄中間過程 可以寫文件或是畫圖等 還要紀錄adr」。AI 先派研究 agent 只查 learn.microsoft.com（`notes/part_c/fabric-facts.md`，85 條），十個方向題全部標「AI 暫定」，寫出設計文件與 ADR-06～08 草稿，再派三個 fresh-context agent 審查。
+
+AI 的錯（發現者：驗收 agent）：讓 Power BI 用 Direct Lake 讀 SQL view，但自己的查證清單 F5-5 寫明這樣會退回 DirectQuery；權限同一句混用兩種互斥模式；替使用者定了“營收排除 ×1000 的單”；轉述 28,578 張 completed 時漏了“以標成已完成的當下為基準”。都已修正。第 2 輪驗收又抓到 AI 修正時引入的新錯：修“替使用者定口徑”時，把“營收預設用折扣前”寫成 Part A 已定案（J10 只定了欄位），另有改設計漏改 ADR-06、權限說得超過查證。面試官冷讀給約 4～5 分，最大扣分是“判斷都不是作者做的”。
+
+- 依據：3cfe69d（`notes/part_c/review-round1.md`）
+
+### 2026-10-26｜Part C｜依資料流順序逐題確認
+使用者讀完後說自己是 Fabric 與 DE 架構新手，先要白話說明，再問「沒辦法照順序嗎 從資料流的思考出發」。之後照「產生 → 進場 → 處理 → 交付 → 把關」逐題確認。使用者也提出：「我認為重要的是思考方式不是sql or kql」。
+
+- 依據：3cfe69d
+
+### 2026-10-26｜Part C｜Q1 即時事件用 outbox＋Kafka
+使用者先要看三種做法怎麼實現、outbox 的下游有哪些，再選 outbox＋Kafka：「我選A在不知道真實的業務場景下，我傾向設計高可擴展的系統 而且A也可以做到B的事情，最後C的不確定性太高，出錯的場景比較多」。
+
+- 依據：3cfe69d
+
+### 2026-10-26｜Part C｜Q10 先選 CDC，有了每日 bronze 後自己拿掉 CDC
+使用者先選資料庫 CDC：「C 在功能獨立性下，這個方法的改動最小 不過要分析開CDC的成本」，並追問「那不就是要取決於後端的設計嗎」。成本分析發現 CDC 會讓營運資料庫的 transaction log 截不掉。定了 Q2 補 bronze 後，使用者自己發現：「CDC不就可以拿掉」，改成每日比對 bronze 裡的會員表：「有了每日 bronze，精確到天就夠，不用承擔 CDC 的風險」，並要求查雄獅的會員升等規則；查證結果規則以日為單位，前提成立。
+
+- 依據：3cfe69d（`notes/part_c/cdc-cost.md`、`notes/part_c/lion-member-tier-rules.md`）
+
+### 2026-10-26｜Part C｜Q2 補 bronze，訂單事件也落地
+使用者先問「通常DE會怎麼解」、Kafka 長期保留和 bronze 怎麼取捨，決定：「A 補bronze，事件也落地，因為上游不保證能重給」。
+
+- 依據：3cfe69d
+
+### 2026-10-26｜Part C｜Q3 gold 放 Warehouse
+見 ADR-06。使用者問 Warehouse 的優勢場景、gold 被更新會不會影響管線之後，維持 Warehouse：「維持B，下游用SQL建自己的衍生表」。
+
+- 依據：3cfe69d
+
+### 2026-10-26｜Part C｜Q4 即時鏈路用 Eventhouse
+見 ADR-07。使用者不熟 KQL，先問 Eventhouse 要不要錢（查證：兩方案共用同一份容量，成本不是決定因素），選定 AI 提出的對比框架中的一邊：「多學 KQL，換到省心和秒級」。
+
+- 依據：3cfe69d（`notes/part_c/realtime-cost.md`）
+
+### 2026-10-26｜Part C｜業務知識不足的題目採用 AI 建議
+Q5（即時標初估、每日對帳）、Q6 語意層（見 ADR-08）、Q8（服務帳號＋表層級權限）、Q9（陷阱題 100%、一般題 90%）採用 AI 建議。使用者對 Q6 的理由：「就照你的決策 我這裡沒有太多的業務知識 只能選一個作通用的」。這幾題在 README 標〔AI 產出，使用者修改〕，不標〔使用者判斷〕。
+
+- 依據：3cfe69d
+
+### 2026-10-26｜Part C｜Q7 自建問數服務
+Fabric data agent 官方寫明不支援非英文。使用者：「B 因為我偏好自己作」；AI 建議為這題補 ADR，使用者：「不要」。
+
+- 依據：3cfe69d
+
+### 2026-10-26｜Part C｜營收的定義：不含已取消、折扣前後兩個都給
+承接第三部分「營收的定義不在 Part A 決定，移到 Part C 語意層」。折扣前後：使用者選 AI 提的通用做法「兩個都給」；已取消算不算：AI 只列選項不給建議，使用者：「不算」。
+
+- 依據：3cfe69d
+
+### 2026-10-26｜Part C｜AI 漏看工作檔，收尾由 AI 代做
+AI 的錯（發現者：AI 自查）：主 session 10-24 寫進 `.claude/work/part-c.md` 的待辦，Part C session 直到 Q9 結束才看到，期間把“正式營收排除 40 張”寫成 Part A 已定案；已改成 Part A 只定「人工確認前不計入下游金額指標」（`business-assumptions.md` 3.7）。
+
+逐題確認期間另有幾件 AI 的錯：說明 Q1 時說下游靠 `event_id` 去重，其實設計是取每張單最新的 `updated_at`（AI 自查）；驗收 agent 三次抓到歸屬灌功，把 AI 的理由或 AI 提的「兩個都給」標成〔使用者判斷〕；補 `business-assumptions.md` 3.9 時目錄重複插入一份（AI 自查）。都已修正。
+
+收尾時使用者說「你幫我」「你幫我收尾」：ADR-06～08 的狀態由 AI 依使用者指示改成已定案（偏離「只有使用者能改」的書面規則，ADR 狀態欄寫明）；F2-2 連結由 AI 代為核對；README 第 10 節由 AI 依紀錄撰寫，標〔AI 產出〕。使用者再說「為什麼要交接 你要完成啊」，本部分的事件改由 Part C session 直接寫入。
+
+- 依據：3cfe69d；本事件、ADR 關聯欄、`business-assumptions.md` 3.9〔待 commit〕

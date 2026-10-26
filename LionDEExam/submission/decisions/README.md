@@ -30,7 +30,7 @@
 | [ADR-02](ADR-02-source-abstraction-schema-contract.md) | 管線以抽象來源設計，品質規則寫成 schema 合約 | A | 已定案 |
 | [ADR-03](ADR-03-order-id-collision-as-noise.md) | 增量檔與 base 撞號的列當 noise 處理 | A | 已定案 |
 | [ADR-04](ADR-04-fact-order-grain.md) | fact_order 粒度：一張訂單一列，存最新狀態 | A | 已定案 |
-| [ADR-05](ADR-05-rerun-against-pre-batch-version.md) | 重跑時以「這批寫入前」的 fact 版本為比對基準 | A | 草稿 |
+| [ADR-05](ADR-05-rerun-against-pre-batch-version.md) | 重跑時以「這批寫入前」的 fact 版本為比對基準 | A | 已定案 |
 | [ADR-06](ADR-06-gold-in-warehouse.md) | bronze／silver 用 Lakehouse，gold 放 Warehouse | C | 已定案 |
 | [ADR-07](ADR-07-realtime-path-eventhouse.md) | 即時鏈路：Eventstream → Eventhouse → Real-Time Dashboard | C | 已定案 |
 | [ADR-08](ADR-08-semantic-layer-location.md) | 語意層：指標口徑放 gold 實體表，semantic model 建在表上 | C | 已定案 |

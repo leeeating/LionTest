@@ -1,7 +1,7 @@
 # ADR-06｜bronze／silver 用 Lakehouse，gold 放 Warehouse
 - 狀態：已定案（2026-10-26，使用者指示 AI 代改：「你幫我」）
 - Part：C
-- 關聯：process-log 事件待使用者確認後由主 session 建立；素材見 `notes/part_c/tentative-decisions.md`「Q3」、`notes/part_c/process.md`
+- 關聯：process-log「Q3 gold 放 Warehouse」；素材見 `notes/part_c/tentative-decisions.md`「Q3」、`notes/part_c/process.md`
 
 ## 背景
 題目 Part C 要在 Microsoft Fabric 上同時支撐每日 Power BI 報表、分鐘級即時儀表板、Text-to-SQL 問數。批次層（bronze／silver／gold）要放在 Lakehouse 還是 Warehouse，會決定寫入用哪個引擎、Part A 的程式能不能直接沿用。

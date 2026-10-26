@@ -1,7 +1,7 @@
 # ADR-08｜語意層：指標口徑放 gold 實體表，semantic model 建在表上
 - 狀態：已定案（2026-10-26，使用者指示 AI 代改：「你幫我」）
 - Part：C
-- 關聯：process-log 事件待使用者確認後由主 session 建立；素材見 `notes/part_c/tentative-decisions.md`「Q6」「Q7」
+- 關聯：process-log「業務知識不足的題目採用 AI 建議」（Q6）「營收的定義：不含已取消、折扣前後兩個都給」「Q7 自建問數服務」；素材見 `notes/part_c/tentative-decisions.md`「Q6」「Q7」
 
 ## 背景
 「語意層」是指「營收」「取消率」這類業務名詞，對應到哪張表、哪個欄位、怎麼算的權威定義。Power BI 報表和 Text-to-SQL 問數都要用它，兩邊算出不同數字就沒人相信。

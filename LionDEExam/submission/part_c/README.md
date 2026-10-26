@@ -200,7 +200,7 @@ flowchart LR
 | 建什麼 | 擋哪種錯 | 連回 Part A |
 |---|---|---|
 | **指標定義檔**（`metrics.yaml`）：每個指標一筆，寫名稱、同義詞、口徑（用哪個金額欄、排除哪些單、用哪個日期）、對應 SQL；由它產生表欄位描述、semantic model 描述、問數 instructions | 同一個「營收」在報表和問數算法不同 | E8、E9 |
-| **`gold_order_metrics` 實體表**：每張單一列，帶 `gross_amount_twd`（折扣前）、`net_amount_twd`（折扣後）、`is_amount_suspect`（在 `amount_review` 人工確認清單上）、`order_date_taipei`、`has_departed`（出發日是否已過）、`order_status`。**營收不含已取消的訂單**（〔使用者判斷〕2026-10-26）。疑似 ×1000 的單：Part A 只定了「40 張留在 fact，人工確認前不計入下游的金額指標」（`../business-assumptions.md` 3.7「人工確認前，待確認訂單不計入下游的金額指標」），金額指標排除 `is_amount_suspect` 為真的列。**營收的完整定義由 Part C 決定**（process-log「營收的定義不在 Part A 決定，移到 Part C 語意層」）。Part A 的 J10 定了 `amount` 欄位存折扣前、另外提供折扣後；「營收」沒有指定折扣前後時，**兩個都給**（〔AI 產出，使用者修改〕AI 提出的通用做法，作者選定，2026-10-26）：回答寫明「折扣前 X 元，折扣後 Y 元」 | LLM 挑錯金額欄、用 UTC 日期分組、不知道有異常金額 | E8、E9、E10 |
+| **`gold_order_metrics` 實體表**：每張單一列，帶 `gross_amount_twd`（折扣前）、`net_amount_twd`（折扣後）、`is_amount_suspect`（在 `amount_review` 人工確認清單上）、`order_date_taipei`、`has_departed`（出發日是否已過）、`order_status`。**營收不含已取消的訂單**（〔使用者判斷〕2026-10-26）。疑似 ×1000 的單：Part A 只定了「40 張留在 fact，人工確認前不計入下游的金額指標」（`../business-assumptions.md` 3.7「人工確認前，待確認訂單不計入下游的金額指標」），金額指標排除 `is_amount_suspect` 為真的列。**營收的完整定義由 Part C 決定**（process-log「營收的定義不在 Part A 決定，移到 Part C 語意層」）。Part A 的 J10 定了 `amount` 欄位存折扣前、另外提供折扣後；營收的定義見 `../business-assumptions.md` 3.9。「營收」沒有指定折扣前後時，**兩個都給**（〔AI 產出，使用者修改〕AI 提出的通用做法，作者選定，2026-10-26）：回答寫明「折扣前 X 元，折扣後 Y 元」 | LLM 挑錯金額欄、用 UTC 日期分組、不知道有異常金額 | E8、E9、E10 |
 | **易混名詞表**：寫進 instructions，例如「已完成（completed）不等於已出團，問出團要用 `has_departed`」「問營收沒指定折扣前後時，兩個都給」「營收不含已取消的訂單」 | 字面意思對、業務意思錯 | E11 |
 
 ### 6.2 元資料
