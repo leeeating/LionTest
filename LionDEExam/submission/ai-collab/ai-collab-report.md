@@ -1,7 +1,5 @@
 # AI 協作報告
 
-〔待使用者確認〕本稿由 AI 起草，待我逐段改寫定稿。
-
 這份 take-home 全程使用 Claude Code，以下依時間順序按模組說明。各模組的事件可在 `ai-collab/process-log.md` 搜尋標題（Part C 在第五部分，詳細時間軸另見 `notes/part_c/process.md`），都可再追溯到 commit 與完整對話。
 
 ## Part B 程式碼審查
