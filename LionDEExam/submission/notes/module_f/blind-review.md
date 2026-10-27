@@ -227,7 +227,7 @@ train n 50600 test n 49400
 
 ```python
 import pandas as pd, numpy as np
-D="/Users/liyiting/Documents/OpenSource/LionTest/LionDEExam/candidate_package/dataset/"
+D="LionDEExam/candidate_package/dataset/"
 raw=pd.read_csv(D+"orders_base.csv")
 c=pd.to_datetime(raw.order_created_at,format="mixed",utc=True)
 u=pd.to_datetime(raw.updated_at,format="mixed",utc=True)
@@ -346,7 +346,7 @@ Name: count, dtype: int64
 
 ```python
 import pandas as pd, numpy as np, re
-D="/Users/liyiting/Documents/OpenSource/LionTest/LionDEExam/candidate_package/dataset/"
+D="LionDEExam/candidate_package/dataset/"
 raw=pd.read_csv(D+"orders_base.csv")
 dup=raw[raw.order_id.duplicated(keep=False)].sort_values("order_id")
 print("dup rows",len(dup),"dup ids",dup.order_id.nunique())
@@ -437,7 +437,7 @@ max      29.0
 
 ```python
 import pandas as pd, numpy as np, re
-D="/Users/liyiting/Documents/OpenSource/LionTest/LionDEExam/candidate_package/dataset/"
+D="LionDEExam/candidate_package/dataset/"
 raw=pd.read_csv(D+"orders_base.csv")
 raw["fmt"]=np.where(raw.order_created_at.str.contains("/"),"slash_naive",np.where(raw.order_created_at.str.endswith("Z"),"Z","iso+08"))
 c=pd.to_datetime(raw.order_created_at,format="mixed",utc=True)
@@ -656,11 +656,11 @@ print(f"時間切分＋時間點正確特徵：Train AUC={auc(y[trm],predict(w,X
 
 ## 附錄 A. 共用程式碼
 
-所有查詢都用 `/Users/liyiting/Documents/OpenSource/LionTest/.venv/bin/python -I -W ignore qN.py` 執行，並 import 以下 `common.py`。`load_orders`、`build_features` 逐行照抄原管線；`fit_logreg` 用 Newton 法、L2 懲罰 1.0，對應 sklearn `LogisticRegression` 預設 `C=1.0`；`auc` 用 Mann-Whitney 秩和，等同 `roc_auc_score`。隨機切分用 `np.random.RandomState(7).permutation`，和 sklearn 的切法不保證逐列相同，所以重現的 0.9999 和 DS 回報的「0.9 以上」數字不同但方向一致。
+所有查詢都用 `.venv/bin/python -I -W ignore qN.py` 執行，並 import 以下 `common.py`。`load_orders`、`build_features` 逐行照抄原管線；`fit_logreg` 用 Newton 法、L2 懲罰 1.0，對應 sklearn `LogisticRegression` 預設 `C=1.0`；`auc` 用 Mann-Whitney 秩和，等同 `roc_auc_score`。隨機切分用 `np.random.RandomState(7).permutation`，和 sklearn 的切法不保證逐列相同，所以重現的 0.9999 和 DS 回報的「0.9 以上」數字不同但方向一致。
 
 ```python
 import pandas as pd, numpy as np
-D="/Users/liyiting/Documents/OpenSource/LionTest/LionDEExam/candidate_package/dataset/"
+D="LionDEExam/candidate_package/dataset/"
 def load_orders():  # 與 churn_training_pipeline.load_orders 相同
     df = pd.read_csv(D+"orders_base.csv")
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
@@ -703,7 +703,7 @@ def split(n, test_size=0.25, seed=7):
 
 ```python
 import pandas as pd, numpy as np, sys
-D="/Users/liyiting/Documents/OpenSource/LionTest/LionDEExam/candidate_package/dataset/"
+D="LionDEExam/candidate_package/dataset/"
 raw=pd.read_csv(D+"orders_base.csv")
 print("rows",len(raw),"unique order_id",raw.order_id.nunique())
 print(raw.order_status.value_counts(dropna=False))

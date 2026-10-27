@@ -347,7 +347,7 @@ def test_label_shuffle(orders, pipeline, seeds=range(5)):
 
 ```python
 import pandas as pd, numpy as np
-D="/Users/liyiting/Documents/OpenSource/LionTest/LionDEExam/candidate_package/dataset/"
+D="LionDEExam/candidate_package/dataset/"
 def load_orders():  # 與 churn_training_pipeline.load_orders 相同
     df = pd.read_csv(D+"orders_base.csv")
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce")

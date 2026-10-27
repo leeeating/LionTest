@@ -1,6 +1,6 @@
 # Part C｜Microsoft Fabric 架構設計：日批 BI、分鐘級儀表板、Text-to-SQL 問數
 
-> **草稿（2026-10-26 更新）**：第一版由 AI 在作者不在場時依規劃與官方文件查證寫成（2026-10-19），經 fresh-context 審查修正（`../notes/part_c/review-round1.md`）。2026-10-26 起作者依資料流順序逐題確認：Q1～Q4、Q7、Q10 由作者定案，Q5、Q6、Q8、Q9 採用 AI 建議（`../notes/part_c/tentative-decisions.md`）。製作過程見 `../notes/part_c/process.md`。
+> **製作說明（2026-10-26 定稿）**：第一版由 AI 在作者不在場時依規劃與官方文件查證寫成（2026-10-19），經 fresh-context 審查修正（`../notes/part_c/review-round1.md`）。2026-10-26 起作者依資料流順序逐題確認：Q1～Q4、Q7、Q10 由作者定案，Q5、Q6、Q8、Q9 採用 AI 建議（`../notes/part_c/tentative-decisions.md`）。製作過程見 `../notes/part_c/process.md`。
 
 **歸屬標註說明**（題目要求 4）：每個 `##` 標一種
 - 〔AI 產出〕：AI 寫的，作者還沒改

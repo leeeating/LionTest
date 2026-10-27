@@ -42,7 +42,7 @@
 | dim_member SCD2（T4） | 完成（獨立驗收通過） |
 | fact_order 初始載入、隔離表、對帳（T5） | 完成（獨立驗收通過） |
 | 增量處理與冪等證明（T6） | 完成（獨立驗收通過，見 `notes/part_a/t6-review-findings.md`） |
-| 文件（T7） | 本檔、`model.md`、`data-quality-report.md` 已更新到四批跑完的現況；資料品質報告的修正待重新獨立驗收 |
+| 文件（T7） | 本檔、`model.md`、`data-quality-report.md` 已更新到四批跑完的現況；資料品質報告已定稿（451d585），修正後重新獨立驗收通過，紀錄見 [`notes/part_a/a3-review-round2.md`](../notes/part_a/a3-review-round2.md) |
 
 ## 2. 怎麼跑
 

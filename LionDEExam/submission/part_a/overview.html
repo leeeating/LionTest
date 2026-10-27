@@ -312,7 +312,7 @@ body.playing .player{display:flex;position:fixed;bottom:12px;left:50%;transform:
   <div class="cols3">
     <div class="tile"><div class="big tabnum">112,010 張</div><div class="lbl">三天後寫進資料表的訂單（含 40 張異常金額）。每一批收到的資料都對得上帳，一筆不漏。</div></div>
     <div class="tile"><div class="big tabnum" style="font-size:1.6rem">張數 0.04%</div><div class="big tabnum" style="font-size:1.6rem">金額 28.09%</div><div class="lbl">40 張金額多了 1,000 倍的訂單，只佔 5～6 月訂單的 0.04%，卻佔金額的 28.09%。</div></div>
-    <div class="tile"><div class="big tabnum">每天約 600 筆</div><div class="lbl">更新檔裡看起來是“舊訂單的更新”，其實是另一張訂單撞了號。照官方說法處理會算錯會員與取消率。</div></div>
+    <div class="tile"><div class="big tabnum">每天約 600 筆</div><div class="lbl">更新檔裡看起來是“舊訂單的更新”，判定為另一張訂單撞了號。若是撞號，照官方說法處理會算錯會員與取消率。</div></div>
   </div>
   <p class="src">技術細節：<a href="data-quality-report.md">A-3 資料品質報告</a> 第 1 節、附錄 C 的問題總數；<a href="README.md">Part A README</a>“三天實跑的對帳”</p>
 </section>
@@ -659,7 +659,7 @@ body.playing .player{display:flex;position:fixed;bottom:12px;left:50%;transform:
 
 <!-- ============ 09 ============ -->
 <section class="scene" id="s9" aria-labelledby="h9">
-  <header><span class="no">09</span><h2 id="h9">問題 2｜每天約 600 筆“舊訂單的更新”，其實是另一張訂單撞了號</h2></header>
+  <header><span class="no">09</span><h2 id="h9">問題 2｜每天約 600 筆“舊訂單的更新”，判定為另一張訂單撞了號</h2></header>
   <div class="cols">
     <div class="rec"><div class="hd"><span>ORD00005192</span><span class="from">5～6 月總檔</span></div>
       <dl><dt>會員</dt><dd>M007765</dd><dt>金額</dt><dd>10,230.87 美元</dd><dt>狀態</dt><dd>已付款</dd></dl></div>

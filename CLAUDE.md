@@ -13,7 +13,7 @@ LionTest/                              git repo 根目錄
     ├── candidate_package/             原始素材（唯讀）
     └── submission/                    所有繳交物，一律 Markdown；圖解可附自包含 HTML 當輔助
         ├── README.md                  交付索引
-        ├── part_a/  part_b/  part_c/  module_x/
+        ├── part_a/  part_b/  part_c/  module_f/
         ├── notes/                     理解問題時的筆記（分層、多檔）
         ├── learning/                  討論中選出的可遷移觀念筆記
         ├── decisions/                 ADR，說明見其 README.md

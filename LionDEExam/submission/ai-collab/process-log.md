@@ -591,7 +591,7 @@ AI 的錯：`notes/part_a/schema-inference/coupon-currency.md` 寫「官方 READ
 
 AI 的錯：收尾 agent 第一次跑 P- 段時，用 `member_sk < 0` 找「未知會員」列，得到 4,436 列。`member_sk` 是 xxhash64，本來就可能是負數，這個檢查本身是錯的；改成 `member_sk = -1 OR member_id IS NULL` 後是 0。發現者：收尾 agent 自查。另外 P- 段跑出「城市為空值的會員 65 位」，比報告原寫的 61 位多，agent 新增 `Q-V9.na_before_real` 查證多出的 4 位是「先 N/A、後來才有真實城市」的會員，報告改引這條查詢。
 
-- 依據：`part_a/data-quality-report.md`、`part_a/profiling/data_quality_queries.py`（未 commit，待驗收）
+- 依據：`part_a/data-quality-report.md`、`part_a/profiling/data_quality_queries.py`（451d585；重新驗收見 `notes/part_a/a3-review-round2.md`）
 
 ## 第四部分：進階模組 F
 
@@ -611,7 +611,7 @@ A-3 定稿候選的 read-back 驗收（有條件過）指出：一起繳交的 `
 
 AI 的錯：報告 §2.1 寫「不排除的話營收會高估將近三成」，README 寫「base 約多 28%」。28.09% 是 40 張在照原樣總額裡的佔比，不是高估幅度；以除以 1,000 修正後的金額為基準，照原樣其實高估約 39%。這句從 A-3 白話改寫時就存在，主對話在對使用者說明 V2 時也重複了「高估約 28%」「高估將近三成」，前兩輪驗收都沒抓到。發現者：第二輪針對性驗收 agent 重算時發現。
 
-- 依據：`part_a/data-quality-report.md`、`part_a/model.md`、`part_a/README.md`、`business-assumptions.md`（未 commit，修正中）
+- 依據：`part_a/data-quality-report.md`、`part_a/model.md`、`part_a/README.md`、`business-assumptions.md`（451d585）
 
 ### 2026-10-26｜模組 F｜使用者判斷：特徵只能用下單之前的歷史
 
@@ -761,7 +761,7 @@ AI 的錯：依驗收建議逐條加內容，沒有先檢查文件的粒度是�
 
 ### 2026-10-26｜模組 F｜正式報告雙軸審查：有條件過
 
-模組 F 正式報告 `module_x/README.md` 由寫作 agent 依已定案的筆記整理而成，接著用 `review-two-axis` 做雙軸審查。Spec 來源是題目「模組 F」與 process-log 第四部分的定案。兩軸結論都是有條件過。發現者：驗收 agent。
+模組 F 正式報告 `module_f/README.md` 由寫作 agent 依已定案的筆記整理而成，接著用 `review-two-axis` 做雙軸審查。Spec 來源是題目「模組 F」與 process-log 第四部分的定案。兩軸結論都是有條件過。發現者：驗收 agent。
 
 - Spec 軸：三項繳交物齊全，和定案一致。問題一，報告正文點名 D3～D6，附錄也保留 D5 的查詢輸出，但定案是「D3～D6 不放進報告」。問題二，報告寫「由獨立審查逐行確認虛擬碼沒有用到下單之後的資訊」，process-log 只記到第二次驗收，最終版虛擬碼的第三次驗收（通過）沒有記錄。
 - Standards 軸：附錄 B～G 的查詢全部重跑，輸出逐字一致；34 個錨點全部有效。問題如下：合成資料的數字被拿來下判斷，例如「40 組重複佔 0.04%，影響可忽略」「120 個編號影響範圍小」「實際影響小」；修正設計虛擬碼的 `floor_to_day(order.created_at)`、`as_of.date()` 沒有指定時區，訓練與上線可能用不同的日界線；附錄 E 標成「時間點正確」的會員取消率沒有過濾出發日已過，和修正設計的標籤定義不一致。附錄程式碼另有重複讀檔、命名不清等判斷題。
@@ -770,7 +770,7 @@ AI 的錯：依驗收建議逐條加內容，沒有先檢查文件的粒度是�
 
 哪些要修由使用者決定〔待使用者確認〕。
 
-- 依據：`module_x/README.md`（f489ab9）
+- 依據：`module_f/README.md`（f489ab9）
 
 ### 2026-10-26｜模組 F｜正式報告修正兩輪後驗收通過
 
@@ -778,27 +778,27 @@ AI 的錯：依驗收建議逐條加內容，沒有先檢查文件的粒度是�
 
 AI 的錯：第一輪修正時，AI 要求修正 agent 補上「原管線時區偏差」的說明，和使用者「D3～D6 不放進報告」的定案衝突；統一 as_of 用詞時只改了文字，沒改虛擬碼；重複列的比例寫錯（80 列寫成 0.04%）。發現者：驗收 agent。
 
-- 依據：`module_x/README.md`（f489ab9）
+- 依據：`module_f/README.md`（f489ab9）
 
 ### 2026-10-26｜模組 F｜模組選擇說明由使用者撰寫
 
 AI 只提供骨架（選 F 的理由、不選 D 的理由、不選 E 的理由），並在使用者質疑「你確定可以這樣？」後，承認引導問題裡的舉例可能帶著使用者走，建議只用骨架、理由自己想。使用者的理由分三次說出：「選F是因為我認為他比較接近MLE的工作，而我碩士就是在做設計跟改善ML模型」「如果有排序的話我第二個會選D 因為可以接觸到更多軟體上的技術」「E的話，我認為可以使用Jev當作決策模型來幫忙 後續的技術可能會在agent發展中被弱化」。AI 不認得 Jev，派 agent 查證：確認是 TypeSafe AI 於 2026-09 發表的決策模型，已有研究把它當評判使用，但在需要逐步驗證的題目（含程式與邏輯）上較弱，所以措辭維持「幫忙」。AI 只改錯字與語序，使用者確認後放進報告第 0 節。
 
-- 依據：`module_x/README.md` 第 0 節（f489ab9）
+- 依據：`module_f/README.md` 第 0 節（f489ab9）
 
 ### 2026-10-26｜模組 F｜選擇說明補充 E 的價值
 
 使用者在了解 rubric、harness 的差異之後補充：「E模組雖然在模型能力提升下，模組E的定位會被弱化，但這是一個非常值得開發成企業內部agent的方向」。AI 指出這句和原本第三句「相關技術也可能被弱化」重複，提供 A（直接加在最後）、B（與第三句合併）兩個版本，使用者選 B。
 
-- 依據：`module_x/README.md` 第 0 節（811ee26）
+- 依據：`module_f/README.md` 第 0 節（811ee26）
 
 ### 2026-10-26｜模組 F｜加做 HTML 圖解，放寬「一律 Markdown」
 
 使用者要求「生成html圖解說明」。AI 指出專案規則是繳交物一律 Markdown，請使用者選擇用途：A 自己複習、不繳交；B 一起繳交。AI 建議 A，使用者選 B。專案 CLAUDE.md 因此改為「一律 Markdown；圖解可附自包含 HTML 當輔助」。圖的內容使用者選了 1（洩漏機制）與 2（時間軸切分）。
 
-製作 agent 產出 `module_x/diagrams.html`，README 3.1、4.4 各加一行連結。驗收 agent 結論為有條件過：圖 2 的座標與「留／不留」判斷全部正確，但有 4 處文字少了限定語，或把示意寫得像事實，例如「真實會員 M000175 的五筆訂單」（該會員實際有 15 筆）、「同一組通常是第一次出現」（是從這份資料推廣出的通則）。AI 已修正這 4 處，並把「下單之前」改成「下單當天以前」。發現者：驗收 agent。
+製作 agent 產出 `module_f/diagrams.html`，README 3.1、4.4 各加一行連結。驗收 agent 結論為有條件過：圖 2 的座標與「留／不留」判斷全部正確，但有 4 處文字少了限定語，或把示意寫得像事實，例如「真實會員 M000175 的五筆訂單」（該會員實際有 15 筆）、「同一組通常是第一次出現」（是從這份資料推廣出的通則）。AI 已修正這 4 處，並把「下單之前」改成「下單當天以前」。發現者：驗收 agent。
 
-- 依據：`module_x/diagrams.html`、`CLAUDE.md`（5b767cf）
+- 依據：`module_f/diagrams.html`、`CLAUDE.md`（5b767cf）
 
 ### 2026-10-26｜模組 F｜存活分析擴寫成小節；HTML 改成有排版的完整報告
 
@@ -806,7 +806,7 @@ AI 只提供骨架（選 F 的理由、不選 D 的理由、不選 E 的理由�
 
 AI 的錯：兩次把「HTML」理解成換格式，沒有先查 repo 既有的 HTML 慣例。發現者：使用者。
 
-- 依據：`module_x/README.md`、`module_x/report.html`（5b767cf）
+- 依據：`module_f/README.md`、`module_f/report.html`（5b767cf）
 
 ### 2026-10-26｜模組 F｜圖解報告驗收；不用「分鏡」稱呼
 
@@ -821,7 +821,7 @@ AI 的錯：兩次把「HTML」理解成換格式，沒有先查 repo 既有的 
 
 驗收期間，使用者說：「不要用分境去稱呼」。report.html 與 README 連結裡的「分鏡／第 N 鏡」全部改成「頁／第 N 頁」，用「頁」而不用「節」，是為了避免和 README 的章節編號混淆。圖 1、圖 2 已併入 report.html，使用者決定刪除 `diagrams.html`（「刪除」），report.html 裡指向它的連結一併移除。
 
-- 依據：`module_x/report.html`、`module_x/README.md` 4.8（5b767cf）
+- 依據：`module_f/report.html`、`module_f/README.md` 4.8（5b767cf）
 
 ## 第五部分：Part C 架構設計
 
@@ -886,4 +886,4 @@ AI 的錯（發現者：AI 自查）：主 session 10-24 寫進 `.claude/work/pa
 
 收尾時使用者說「你幫我」「你幫我收尾」：ADR-06～08 的狀態由 AI 依使用者指示改成已定案（偏離「只有使用者能改」的書面規則，ADR 狀態欄寫明）；F2-2 連結由 AI 代為核對；README 第 10 節由 AI 依紀錄撰寫，標〔AI 產出〕。使用者再說「為什麼要交接 你要完成啊」，本部分的事件改由 Part C session 直接寫入。
 
-- 依據：3cfe69d；本事件、ADR 關聯欄、`business-assumptions.md` 3.9〔待 commit〕
+- 依據：3cfe69d；本事件、ADR 關聯欄、`business-assumptions.md` 3.9（2317485）

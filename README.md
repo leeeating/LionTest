@@ -8,10 +8,10 @@
 
 | Part | 內容 | 繳交物 | 狀態 |
 |---|---|---|---|
-| A | 星型模型、增量 ETL、資料品質報告 | `LionDEExam/submission/part_a/` | 未開始 |
+| A | 星型模型、增量 ETL、資料品質報告 | [`part_a/README.md`](LionDEExam/submission/part_a/README.md) | 已完成；資料品質報告見 `part_a/data-quality-report.md` |
 | B | `buggy_pipeline.py` 程式碼審查 | [`part_b/code-review.md`](LionDEExam/submission/part_b/code-review.md) | 已定稿；之後改善項目見 `part_b/future-improvements.md` |
-| C | 架構設計 | `LionDEExam/submission/part_c/` | 未開始 |
-| 進階模組 | D／E／F 三選一 | `LionDEExam/submission/module_x/` | 未選定 |
+| C | 架構設計 | [`part_c/README.md`](LionDEExam/submission/part_c/README.md) | 已完成；決策見 `decisions/` ADR-06～08 |
+| 進階模組 | D／E／F 三選一，選 F（特徵管線除錯） | [`module_f/README.md`](LionDEExam/submission/module_f/README.md) | 已完成；選擇理由見該檔第 0 節 |
 
 ## 快速開始
 
@@ -25,9 +25,9 @@ uv run ruff check <path>     # lint
 
 | 套件 | 用途 |
 |---|---|
-| duckdb、pandas | Part A 候選引擎（用哪一個，會在 Part A 以 ADR 定案） |
-| pyspark、delta-spark | 本機驗證 Part B 審查中的 Spark／Delta 語意 |
-| pytest、ruff | 測試（目前尚無測試，Part A 起加入）、lint |
+| duckdb、pandas | Part A 資料品質報告的 DuckDB 檢核查詢（引擎已依 [ADR-01](LionDEExam/submission/decisions/ADR-01-execution-engine.md) 定案為 PySpark＋Delta） |
+| pyspark、delta-spark | Part A 管線的執行引擎（ADR-01）；本機驗證 Part B 審查中的 Spark／Delta 語意 |
+| pytest、ruff | 測試（Part A，`uv run pytest LionDEExam/submission/part_a/tests -q`；只跑快的加 `-m "not slow"`）、lint |
 
 pandas 固定在 3.0 以下，因為 PySpark 4.2 還沒完全支援 pandas 3。
 
@@ -53,7 +53,7 @@ LionTest/
 └── LionDEExam/
     └── submission/           所有繳交物
         ├── README.md         繳交物索引
-        ├── part_a/ part_b/ part_c/ module_x/
+        ├── part_a/ part_b/ part_c/ module_f/
         ├── notes/            理解問題時的筆記（資料字典、概念說明）
         ├── learning/         討論中選出的可遷移觀念筆記
         ├── decisions/        設計決策（ADR）
